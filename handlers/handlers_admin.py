@@ -493,3 +493,71 @@ async def check_users_command(message: Message):
         return
     await sql.UPDATE_DELETE_ALL(False)
     await message.answer('Все юзеры разблокированы')
+
+
+@router.message(Command(commands=['send_push']))
+async def send_push_command(message: Message):
+    if message.from_user.id != 1012882762:
+        return
+
+    await message.answer("🔄 Начинаю отправку push-уведомления...")
+
+    # Текущая дата
+    now = datetime.now()
+
+    # Получаем всех пользователей
+    all_users = await sql.get_all_users()
+
+    # Фильтруем
+    candidates = [1012882762]
+    for user in all_users:
+        if user.is_delete:
+            continue
+        if not user.is_pay_null:
+            continue
+        if not user.subscription_end_date or user.subscription_end_date < now:
+            continue
+        candidates.append(user.user_id)
+
+    if not candidates:
+        await message.answer("❌ Нет пользователей, удовлетворяющих условиям.")
+        return
+    else:
+        await message.answer(f"Всего {len(candidates)} пользователей, удовлетворяющих условиям.")
+
+    push_text = '''
+⚠️ Технические работы завершены
+
+Дорогие пользователи! Мы столкнулись с мощной DDoS-атакой, из-за чего страница личного кабинета <b>могла быть</b> временно не доступна у некоторых пользователей.
+Хорошие новости: <b>мы всё починили!</b> Работаем в штатном режиме. 💪
+
+🤔 Всё ещё не в сети?
+Если вы никак не могли разобраться с импортом конфигов — не беда. Мы записали для вас <b>видео</b>, которое решит все вопросы. Смотрите и повторяйте.
+
+🌐 Осталось только нажать кнопку '🔗 Подключить VPN' — и вы снова в безопасном интернете.
+    '''
+
+    success_count = 0
+    fail_count = 0
+
+    for user_id in candidates:
+        try:
+            await bot.send_message(user_id,
+                                   push_text,
+                                   reply_markup=create_kb(1,
+                                                          video_faq='🎥 Видеоинструкция',
+                                                          connect_vpn='🔗 Подключить VPN'))
+            success_count += 1
+            logger.info(f"Push отправлен пользователю {user_id}")
+            await asyncio.sleep(0.05)
+        except Exception as e:
+            fail_count += 1
+            logger.error(f"Ошибка отправки для {user_id}: {e}")
+
+    await message.answer(
+        f"✅ Рассылка завершена.\n"
+        f"👥 Найдено: {len(candidates)}\n"
+        f"✅ Успешно: {success_count}\n"
+        f"❌ Ошибок: {fail_count}"
+    )
+

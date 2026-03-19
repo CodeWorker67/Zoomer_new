@@ -23,6 +23,11 @@ async def get_video(message: Message):
     await message.answer(message.video.file_id)
 
 
+@router.message(F.photo, F.from_user.id.in_(ADMIN_IDS))
+async def get_photo(message: Message):
+    await message.answer(message.photo[-1].file_id)
+
+
 @router.message(Command(commands=['user']))
 async def user_info(message: Message):
 

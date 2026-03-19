@@ -124,9 +124,10 @@ def keyboard_gift_tariff():
 def keyboard_subscription(sub_url, sub_url_white):
     buttons = []
     if sub_url:
-        buttons.append([InlineKeyboardButton(text="📋 Моя подписка", url=sub_url)])
+        buttons.append([InlineKeyboardButton(text="💫 VPN PRO", url=sub_url)])
     if sub_url_white:
-        buttons.append([InlineKeyboardButton(text="🔥 Включи мобильный", url=sub_url_white)])
+        buttons.append([InlineKeyboardButton(text="🦾 Включи мобильный", url=sub_url_white)])
+    buttons.append([InlineKeyboardButton(text="❌ Если страница не загружается", callback_data='import')])
     buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data='back_to_main')])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -134,10 +135,45 @@ def keyboard_subscription(sub_url, sub_url_white):
 def keyboard_sub_after_buy(sub_url):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📋 В личный кабинет", url=sub_url)],
+        [InlineKeyboardButton(text="❌ Если страница не загружается", callback_data='import')],
         [InlineKeyboardButton(text="🎁 Подарить подписку", callback_data="buy_gift")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data='back_to_main')],
     ])
     return keyboard
+
+
+def keyboard_import_os():
+    return create_kb(1,
+                     import_android='🤖 Android',
+                     import_ios='🍎 iOS',
+                     import_windows='🖥️ Windows',
+                     import_macos='🍏 MacOS',
+                     back_to_main='🔙 Назад')
+
+
+def keyboard_import_app(os_callback: str):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⭐️ Happ", callback_data=f"{os_callback}_happ")],
+        [InlineKeyboardButton(text="📡 V2raytun", callback_data=f"{os_callback}_v2")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")],
+    ])
+
+
+def keyboard_import_sub(app_callback: str, has_casual: bool, has_white: bool):
+    buttons = []
+    if has_casual:
+        buttons.append([InlineKeyboardButton(text="💫 VPN PRO", callback_data=f"{app_callback}_casual")])
+    if has_white:
+        buttons.append([InlineKeyboardButton(text="🦾 Включи мобильный", callback_data=f"{app_callback}_white")])
+    buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def keyboard_import_end(url_app: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📥 Скачать приложение", url=url_app)],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")],
+    ])
 
 
 def keyboard_payment_cancel():

@@ -10,7 +10,7 @@ from sheduler.check_connect import check_connect
 from sheduler.check_cryptobot import check_cryptobot_payments
 from sheduler.check_online import check_online_daily
 from sheduler.check_platega import check_platega, check_platega_card, check_platega_crypto
-from handlers import handlers_user, handlers_statistic, handlers_admin, handlers_broadcast, handlers_export
+from handlers import handlers_user, handlers_statistic, handlers_admin, handlers_broadcast, handlers_export, handlers_import
 from sheduler.time_mes import send_message_cron
 from logging_config import logger
 from sheduler.time_mes_not_sub import send_push_cron
@@ -30,6 +30,7 @@ async def main() -> None:
     dp: Dispatcher = Dispatcher()
     dp.include_router(handlers_broadcast.router)
     dp.include_router(handlers_admin.router)
+    dp.include_router(handlers_import.router)
     dp.include_router(handlers_user.router)
     dp.include_router(handlers_export.router)
     dp.include_router(handlers_statistic.router)

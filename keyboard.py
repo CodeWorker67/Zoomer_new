@@ -124,9 +124,9 @@ def keyboard_gift_tariff():
 def keyboard_subscription(sub_url, sub_url_white):
     buttons = []
     if sub_url:
-        buttons.append([InlineKeyboardButton(text="💫 VPN PRO", url=sub_url)])
+        buttons.append([InlineKeyboardButton(text="💫 Ваша подписка на VPN", url=sub_url)])
     if sub_url_white:
-        buttons.append([InlineKeyboardButton(text="🦾 Включи мобильный", url=sub_url_white)])
+        buttons.append([InlineKeyboardButton(text="🦾 Включить мобильную связь(белые списки)", url=sub_url_white)])
     buttons.append([InlineKeyboardButton(text="❌ Если страница не загружается", callback_data='import')])
     buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data='back_to_main')])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -162,9 +162,9 @@ def keyboard_import_app(os_callback: str):
 def keyboard_import_sub(app_callback: str, has_casual: bool, has_white: bool):
     buttons = []
     if has_casual:
-        buttons.append([InlineKeyboardButton(text="💫 VPN PRO", callback_data=f"{app_callback}_casual")])
+        buttons.append([InlineKeyboardButton(text="💫 Ваша подписка на VPN", callback_data=f"{app_callback}_casual")])
     if has_white:
-        buttons.append([InlineKeyboardButton(text="🦾 Включи мобильный", callback_data=f"{app_callback}_white")])
+        buttons.append([InlineKeyboardButton(text="🦾 Включить мобильную связь(белые списки)", callback_data=f"{app_callback}_white")])
     buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -191,8 +191,6 @@ def keyboard_payment_method(tarif):
         [InlineKeyboardButton(text="💳 Карта РФ", callback_data=f"card_{tarif}")],
         [InlineKeyboardButton(text="⭐️ Telegram Stars", callback_data=f"stars_{tarif}")],
         [InlineKeyboardButton(text="💎 Криптовалюта", callback_data=f"crypto_{tarif}")],
-        # [InlineKeyboardButton(text="💎 TON", callback_data=f"crypto_ton_{tarif}")],
-        # [InlineKeyboardButton(text="💵 USDT", callback_data=f"crypto_usdt_{tarif}")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data='back_to_main')],
     ])
     return keyboard
@@ -203,8 +201,6 @@ def keyboard_payment_method_stock(tarif):
         [InlineKeyboardButton(text="💳 Карта РФ", callback_data=f"card_{tarif}")],
         [InlineKeyboardButton(text="⭐️ Telegram Stars", callback_data=f"stars_{tarif}")],
         [InlineKeyboardButton(text="💎 Криптовалюта", callback_data=f"crypto_{tarif}")],
-        # [InlineKeyboardButton(text="💎 TON", callback_data=f"crypto_ton_{tarif}")],
-        # [InlineKeyboardButton(text="💵 USDT", callback_data=f"crypto_usdt_{tarif}")],
     ])
     return keyboard
 

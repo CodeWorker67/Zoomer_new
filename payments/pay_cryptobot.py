@@ -6,7 +6,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQu
 from bot import sql
 from config import CRYPTOBOT_API_TOKEN, ADMIN_IDS
 from keyboard import create_kb
-from lexicon import lexicon
+from lexicon import lexicon, dct_price, dct_desc
 from logging_config import logger
 
 router: Router = Router()
@@ -22,13 +22,14 @@ class CryptoBotPayment:
             "Content-Type": "application/json"
         }
 
-    async def create_invoice(self, asset: str, amount: float, description: str,
+    async def create_invoice(self, fiat_amount: float, fiat_currency: str, description: str,
                              payload: str, expires_in: int = 7200) -> Dict:
-        """Создание счета в Cryptobot"""
+        """Создание счета в Cryptobot с суммой в фиате — пользователь сам выбирает криптовалюту"""
         url = f"{self.base_url}/createInvoice"
         data = {
-            "asset": asset,
-            "amount": str(amount),
+            "currency_type": "fiat",
+            "fiat": fiat_currency,
+            "amount": str(fiat_amount),
             "description": description,
             "payload": payload,
             "paid_btn_name": "openBot",
@@ -84,32 +85,31 @@ class CryptoBotPayment:
             return None
 
 
-async def create_cryptobot_payment(amount: float, currency: str, description: str,
-                                   user_id: int, duration: int, white: bool,
-                                   is_gift: bool, method: str) -> Dict:
+async def create_cryptobot_payment(rub_amount: int, description: str,
+                                   user_id: int, duration: str, white: bool,
+                                   is_gift: bool) -> Dict:
     """
-    Создание платежа через Cryptobot и запись в БД.
-    Возвращает словарь с ключами: status, url, invoice_id.
+    Создание платежа через Cryptobot с суммой в рублях.
+    Пользователь сам выбирает криптовалюту внутри Cryptobot.
     """
     cryptobot = CryptoBotPayment(CRYPTOBOT_API_TOKEN)
 
-    # Формируем payload для последующей обработки
     payload = (f"user_id:{user_id},duration:{duration},white:{white},"
-               f"gift:{is_gift},method:{method},amount:{amount}")
+               f"gift:{is_gift},method:cryptobot,amount:{rub_amount}")
 
     result = await cryptobot.create_invoice(
-        asset=currency,
-        amount=amount,
+        fiat_amount=float(rub_amount),
+        fiat_currency="RUB",
         description=description,
         payload=payload
     )
+
     if result['status'] == 'pending':
-        # Сохраняем платёж в БД через AsyncSQL
         try:
             await sql.add_cryptobot_payment(
                 user_id=user_id,
-                amount=amount,
-                currency=currency,
+                amount=float(rub_amount),
+                currency="RUB",
                 is_gift=is_gift,
                 invoice_id=result['invoice_id'],
                 payload=payload
@@ -121,66 +121,61 @@ async def create_cryptobot_payment(amount: float, currency: str, description: st
     return result
 
 
-def get_crypto_amount(currency: str, duration: str) -> float:
-    """Возвращает цену для тарифа в указанной криптовалюте"""
-    prices = {
-        'TON': {'30': 0.9, '90': 2.5, '120': 2.5, '180': 4.6, 'white_30': 2.8},
-        'USDT': {'30': 1.3, '90': 3.5, '120': 3.5, '180': 6.5, 'white_30': 4.0}
-    }
-    return prices.get(currency.upper(), {}).get(duration, 0)
-
-
-# Обработчик для крипто-оплаты
 @router.callback_query(F.data.startswith('crypto_'))
 async def process_payment_crypto(callback: CallbackQuery):
+    await callback.answer()
     gift_flag = False
     white_flag = False
     data = callback.data
-
-    parts = data.split('_')
-    currency = parts[1].upper()
+    user_id = callback.from_user.id
 
     if 'gift_' in data:
         gift_flag = True
 
     if gift_flag:
-        duration = data.replace(f'crypto_{parts[1]}_gift_r_', '')
+        duration_key = data.replace('crypto_gift_r_', '')
     else:
-        duration = data.replace(f'crypto_{parts[1]}_r_', '')
+        duration_key = data.replace('crypto_r_', '')
 
-    crypto_amount = get_crypto_amount(currency, duration)
+    rub_amount = dct_price[duration_key]
+    desc_key = duration_key
 
-    if 'white' in duration:
+    if 'white' in duration_key:
         white_flag = True
-        duration = duration.replace('white_', '')
-
-    if not crypto_amount:
-        await callback.answer("Ошибка определения цены для данной валюты", show_alert=True)
-        return
+        duration = duration_key.replace('white_', '')
+    elif 'old' in duration_key:
+        duration = duration_key.replace('old', '')
+    else:
+        duration = duration_key
 
     if callback.from_user.id in ADMIN_IDS:
-        crypto_amount = 0.02
+        rub_amount = 1
+
+    if gift_flag:
+        description = f"Подписка в подарок {dct_desc[desc_key]}"
+    else:
+        description = dct_desc[desc_key]
 
     result = await create_cryptobot_payment(
-        amount=crypto_amount,
-        currency=currency,
-        description=f"Подписка VPN {duration} дней",
-        user_id=callback.from_user.id,
-        duration=int(duration),
+        rub_amount=rub_amount,
+        description=description,
+        user_id=user_id,
+        duration=duration,
         white=white_flag,
-        is_gift=gift_flag,
-        method=currency.lower()
+        is_gift=gift_flag
     )
 
     if result['status'] == 'pending':
-        if white_flag:
-            text = lexicon.get('payment_link_white', 'Оплата в {0}: {1}').format(currency, crypto_amount)
+        text = lexicon['payment_link_white'] if white_flag else lexicon['payment_link']
+        if gift_flag:
+            text += '\n\nДля оплаты <b>подарочной подписки</b> перейдите по ссылке:'
         else:
-            text = lexicon.get('payment_link', 'Оплата в {0}: {1}').format(currency, crypto_amount)
+            text += '\n\nДля оплаты тарифа перейдите по ссылке:'
         pay_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=f"Оплатить {crypto_amount} {currency}", url=result['url'])]
+            [InlineKeyboardButton(text=f"💎 Оплатить криптовалютой ({rub_amount} ₽)", url=result['url'])]
         ])
         await callback.message.edit_text(text, reply_markup=pay_keyboard)
+        logger.info(f"Юзер {user_id} создал счет в Cryptobot на {rub_amount} руб {'(подарок)' if gift_flag else ''}")
     else:
         await callback.message.answer(
             lexicon.get('error_payment', 'Произошла ошибка при создании счета.'),

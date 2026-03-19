@@ -2,7 +2,7 @@ import urllib.parse
 
 from bot import sql
 from config import ADMIN_IDS
-from keyboard import create_kb, keyboard_tariff_old
+from keyboard import create_kb, keyboard_tariff_old, keyboard_tariff
 from logging_config import logger
 import asyncio
 from aiogram import Router, Bot, F
@@ -169,7 +169,7 @@ async def broadcast_confirm_send(callback: CallbackQuery, state: FSMContext, bot
         keyboard_broadcast = keyboard_tariff_old()
     elif selected_parameter == 'subscribed_all':
         user_ids = await sql.SELECT_SUBSCRIBED()
-        keyboard_broadcast = create_kb(1, connect_vpn='🔗 Подключить VPN')
+        keyboard_broadcast = keyboard_tariff()
 
     # Проверяем, есть ли пользователи для отправки
     if not user_ids:

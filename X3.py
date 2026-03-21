@@ -347,7 +347,7 @@ class X3:
     async def activ(self, user_id: str):
         result = {'activ': '🔎 - Не подключён', 'time': '-'}
         try:
-            users = await self.get_user_by_telegram_id(user_id)
+            users = await self.get_user_by_username(user_id)
             if not users or 'response' not in users or not users['response']:
                 logger.info(f"Пользователь {user_id} не найден в системе")
                 return result

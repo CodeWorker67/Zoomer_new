@@ -299,68 +299,68 @@ async def process_payment_card(callback: CallbackQuery):
             await callback.message.answer(lexicon['error_payment'], reply_markup=create_kb(1, back_to_main='🔙 Назад'))
 
 
-@router.callback_query(F.data.startswith('crypto_'))
-async def process_payment_crypto(callback: CallbackQuery):
-    gift_flag = False
-    white_flag = False
-    data = callback.data
-    user_id = str(callback.from_user.id)
-
-    if 'gift_' in data:
-        gift_flag = True
-
-    if gift_flag:
-        duration = data.replace(f'crypto_gift_r_', '')
-    else:
-        duration = data.replace(f'crypto_r_', '')
-
-    rub_amount = dct_price[duration]
-    desc_key = duration
-
-    if 'white' in duration:
-        white_flag = True
-        duration = duration.replace('white_', '')
-    if 'old' in duration:
-        duration = duration.replace('old', '')
-
-    if callback.from_user.id in ADMIN_IDS:
-        rub_amount = 1
-
-    if gift_flag:
-        payment_info = await pay_for_gift(
-            val=str(rub_amount),
-            des=f"Подписка в подарок {dct_desc[desc_key]}",
-            user_id=user_id,
-            duration=duration,
-            white=white_flag,
-            payment_method=13,
-        )
-    else:
-        payment_info = await pay(
-            val=str(rub_amount),
-            des=dct_desc[desc_key],
-            user_id=user_id,
-            duration=duration,
-            white=white_flag,
-            payment_method=13
-        )
-
-    if payment_info['status'] == 'pending':
-        try:
-            text = lexicon['payment_link']
-            if white_flag:
-                text = lexicon['payment_link_white']
-            if 'gift' in callback.data:
-                text += '\n\nДля оплаты <b>подарочной подписки</b> перейдите по ссылке:'
-            else:
-                text += '\n\nДля оплаты тарифа перейдите по ссылке:'
-            await callback.message.edit_text(
-                text=text,
-                reply_markup=keyboard_payment_sbp("💎 Оплатить криптовалютой", payment_info['url'])
-            )
-            logger.info(f"Юзер {user_id} создал счет на оплату криптой {'подарка' if gift_flag else ''} {rub_amount} руб")
-
-        except Exception as e:
-            error_message = f"Ошибка при создании счета: {str(e)}"
-            logger.error(error_message)
-            await callback.message.answer(lexicon['error_payment'], reply_markup=create_kb(1, back_to_main='🔙 Назад'))
+# @router.callback_query(F.data.startswith('crypto_'))
+# async def process_payment_crypto(callback: CallbackQuery):
+#     gift_flag = False
+#     white_flag = False
+#     data = callback.data
+#     user_id = str(callback.from_user.id)
+#
+#     if 'gift_' in data:
+#         gift_flag = True
+#
+#     if gift_flag:
+#         duration = data.replace(f'crypto_gift_r_', '')
+#     else:
+#         duration = data.replace(f'crypto_r_', '')
+#
+#     rub_amount = dct_price[duration]
+#     desc_key = duration
+#
+#     if 'white' in duration:
+#         white_flag = True
+#         duration = duration.replace('white_', '')
+#     if 'old' in duration:
+#         duration = duration.replace('old', '')
+#
+#     if callback.from_user.id in ADMIN_IDS:
+#         rub_amount = 1
+#
+#     if gift_flag:
+#         payment_info = await pay_for_gift(
+#             val=str(rub_amount),
+#             des=f"Подписка в подарок {dct_desc[desc_key]}",
+#             user_id=user_id,
+#             duration=duration,
+#             white=white_flag,
+#             payment_method=13,
+#         )
+#     else:
+#         payment_info = await pay(
+#             val=str(rub_amount),
+#             des=dct_desc[desc_key],
+#             user_id=user_id,
+#             duration=duration,
+#             white=white_flag,
+#             payment_method=13
+#         )
+#
+#     if payment_info['status'] == 'pending':
+#         try:
+#             text = lexicon['payment_link']
+#             if white_flag:
+#                 text = lexicon['payment_link_white']
+#             if 'gift' in callback.data:
+#                 text += '\n\nДля оплаты <b>подарочной подписки</b> перейдите по ссылке:'
+#             else:
+#                 text += '\n\nДля оплаты тарифа перейдите по ссылке:'
+#             await callback.message.edit_text(
+#                 text=text,
+#                 reply_markup=keyboard_payment_sbp("💎 Оплатить криптовалютой", payment_info['url'])
+#             )
+#             logger.info(f"Юзер {user_id} создал счет на оплату криптой {'подарка' if gift_flag else ''} {rub_amount} руб")
+#
+#         except Exception as e:
+#             error_message = f"Ошибка при создании счета: {str(e)}"
+#             logger.error(error_message)
+#             await callback.message.answer(lexicon['error_payment'], reply_markup=create_kb(1, back_to_main='🔙 Назад'))

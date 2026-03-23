@@ -6,6 +6,7 @@ from keyboard import create_kb, keyboard_sub_after_buy
 from lexicon import lexicon
 from logging_config import logger
 
+
 async def process_confirmed_payment(payload):
     """Обработка подтвержденного платежа"""
     try:

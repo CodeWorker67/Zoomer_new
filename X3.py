@@ -352,7 +352,8 @@ class X3:
                 logger.info(f"Пользователь {user_id} не найден в системе")
                 return result
 
-            user = users['response'][0]
+            raw = users['response']
+            user = raw[0] if isinstance(raw, list) else raw
             current_time = int(datetime.datetime.utcnow().timestamp() * 1000)
 
             expiry_time_str = user.get('expireAt')

@@ -7,6 +7,7 @@ load_dotenv()
 
 TG_TOKEN: Optional[str] = os.environ.get("TG_TOKEN")
 ADMIN_IDS: Set[int] = {int(x) for x in os.environ.get("ADMIN_IDS", "").split(', ')} if os.environ.get("ADMIN_IDS") else set()
+CHECKER_IDS: Set[int] = {int(x) for x in os.environ.get("CHECKER_IDS", "").split(', ')} if os.environ.get("CHECKER_IDS") else set()
 PLATEGA_API_KEY: Optional[str] = os.environ.get("PLATEGA_API_KEY")
 PLATEGA_MERCHANT_ID: Optional[str] = os.environ.get("PLATEGA_MERCHANT_ID")
 CHANEL_ID: Optional[int] = int(os.environ.get("CHANEL_ID"))

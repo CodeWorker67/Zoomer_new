@@ -12,7 +12,7 @@ from openpyxl.chart import LineChart, BarChart, Reference
 from sqlalchemy import select, func
 
 from bot import sql
-from config import ADMIN_IDS
+from config import ADMIN_IDS, CHECKER_IDS
 from logging_config import logger
 from config_bd.models import AsyncSessionLocal, Users, Payments, PaymentsStars, PaymentsCryptobot, PaymentsCards, \
     PaymentsPlategaCrypto
@@ -64,8 +64,8 @@ class PaymentRecord:
 
 @router.message(Command(commands=['stat']))
 async def stat_command(message: Message):
-    """Статистика по пользователям с указанным Ref или stamp (только для админов)."""
-    if message.from_user.id not in ADMIN_IDS:
+    """Статистика по пользователям с указанным Ref или stamp (админы и CHECKER_IDS)."""
+    if message.from_user.id not in ADMIN_IDS | CHECKER_IDS:
         return
 
     args = message.text.split()

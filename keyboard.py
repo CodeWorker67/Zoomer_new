@@ -71,7 +71,7 @@ def keyboard_tariff_bonus():
                      r_30='🤝 30 дней - 139 руб',
                      r_90='👌 90 дней - 269 руб',
                      r_180='💪 180 дней - 499 руб',
-                     r_white_30='🦾 Включи мобильный - 299 руб',
+                     r_white_30='🦾 Включи мобильный интернет - 299 руб',
                      free_vpn='🔥ПОПРОБОВАТЬ 5 дней БЕСПЛАТНО🔥',
                      back_to_main='🔙 Назад'
                      )
@@ -83,7 +83,7 @@ def keyboard_tariff():
                      r_30='🤝 30 дней - 139 руб',
                      r_90='👌 90 дней - 269 руб',
                      r_180='💪 180 дней - 499 руб',
-                     r_white_30='🦾 Включи мобильный - 299 руб',
+                     r_white_30='🦾 Включи мобильный интернет - 299 руб',
                      back_to_main='🔙 Назад'
                      )
 
@@ -105,7 +105,7 @@ def keyboard_tariff_old():
                      r_30old='🤝 30 дней - 99 руб',
                      r_90='👌 90 дней - 269 руб',
                      r_180='💪 180 дней - 499 руб',
-                     r_white_30='🦾 Включи мобильный - 299 руб',
+                     r_white_30='🦾 Включи мобильный интернет - 299 руб',
                      back_to_main='🔙 Назад'
                      )
 
@@ -116,7 +116,7 @@ def keyboard_gift_tariff():
                      gift_r_30='🤝 30 дней - 139 руб',
                      gift_r_90='👌 90 дней - 269 руб',
                      gift_r_180='💪 180 дней - 499 руб',
-                     gift_r_white_30='🦾 Включи мобильный - 299 руб',
+                     gift_r_white_30='🦾 Включи мобильный интернет - 299 руб',
                      back_to_main='🔙 Назад'
                      )
 
@@ -124,9 +124,9 @@ def keyboard_gift_tariff():
 def keyboard_subscription(sub_url, sub_url_white):
     buttons = []
     if sub_url:
-        buttons.append([InlineKeyboardButton(text="💫 Ваша подписка на VPN", url=sub_url)])
+        buttons.append([InlineKeyboardButton(text="💫 Ваша подписка на VPN PRO", url=sub_url)])
     if sub_url_white:
-        buttons.append([InlineKeyboardButton(text="🦾 Включи мобильную связь", url=sub_url_white)])
+        buttons.append([InlineKeyboardButton(text="🦾 Включи мобильный интернет", url=sub_url_white)])
     buttons.append([InlineKeyboardButton(text="❌ Если страница не загружается", callback_data='import')])
     buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data='back_to_main')])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -162,9 +162,9 @@ def keyboard_import_app(os_callback: str):
 def keyboard_import_sub(app_callback: str, has_casual: bool, has_white: bool):
     buttons = []
     if has_casual:
-        buttons.append([InlineKeyboardButton(text="💫 Ваша подписка на VPN", callback_data=f"{app_callback}_casual")])
+        buttons.append([InlineKeyboardButton(text="💫 Ваша подписка на VPN PRO", callback_data=f"{app_callback}_casual")])
     if has_white:
-        buttons.append([InlineKeyboardButton(text="🦾 Включи мобильную связь", callback_data=f"{app_callback}_white")])
+        buttons.append([InlineKeyboardButton(text="🦾 Включи мобильный интернет", callback_data=f"{app_callback}_white")])
     buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 

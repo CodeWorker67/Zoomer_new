@@ -146,6 +146,17 @@ async def set_subscription_date(message: Message):
             f"📝 Тип: {'white' if is_white else 'обычная'}\n"
             f"💾 База данных обновлена."
         )
+        try:
+            await bot.send_message(
+                chat_id=user_id,
+                text=f"✅ Вам обновлена дата подписки!\n\n"
+                f"📅 Новая дата окончания подписки: {actual_date.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                f"📝 Тариф: {'🦾 Включи мобильный интернет' if is_white else '💫 подписка на VPN'}\n",
+                reply_markup=create_kb(1, back_to_main='🔙 Назад')
+            )
+        except Exception as e:
+            logger.error(f"Ошибка при отправке сообщения пользователю {user_id}: {e}")
+            await message.answer(f"❌ Произошла ошибка при отправке сообщения пользователю {user_id}: {str(e)}")
 
     except Exception as e:
         logger.error(f"Ошибка в команде /sub: {e}")

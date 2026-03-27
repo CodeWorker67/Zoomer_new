@@ -175,7 +175,7 @@ class X3:
                             await sql.update_white_subscription(user_id, client_id)
                         else:
                             await sql.update_subscription_end_date(user_id, subscription_end_date)
-                            await sql.update_subscription(user_id, client_id)
+                            await sql.update_subscribtion(user_id, client_id)
                         logger.info(f"✅ Клиент {user_id} успешно добавлен (без JSON)")
                         return True
                     else:
@@ -186,7 +186,7 @@ class X3:
                                 await sql.update_white_subscription(user_id, client_id)
                             else:
                                 await sql.update_subscription_end_date(user_id, subscription_end_date)
-                                await sql.update_subscription(user_id, client_id)
+                                await sql.update_subscribtion(user_id, client_id)
                             logger.info(f"✅ Клиент {user_id} успешно добавлен")
                             return True
                         else:

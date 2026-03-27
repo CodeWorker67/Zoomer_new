@@ -2,7 +2,7 @@ import urllib.parse
 
 from bot import sql
 from config import ADMIN_IDS
-from keyboard import create_kb, keyboard_tariff_old, keyboard_tariff
+from keyboard import create_kb, keyboard_tariff_old, keyboard_tariff, STYLE_SUCCESS
 from logging_config import logger
 import asyncio
 from aiogram import Router, Bot, F
@@ -120,7 +120,7 @@ async def confirm_broadcast(message: Message, state: FSMContext):
 
     # Создаем клавиатуру для подтверждения
     confirm_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Подтвердить", callback_data="Подтвердить")],
+        [InlineKeyboardButton(text="Подтвердить", callback_data="Подтвердить", style=STYLE_SUCCESS)],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="broadcast_cancel")]
     ])
 

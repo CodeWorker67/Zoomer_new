@@ -5,7 +5,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQu
 
 from bot import sql
 from config import CRYPTOBOT_API_TOKEN, ADMIN_IDS
-from keyboard import create_kb
+from keyboard import create_kb, STYLE_SUCCESS
 from lexicon import lexicon, dct_price, dct_desc
 from logging_config import logger
 
@@ -172,7 +172,11 @@ async def process_payment_crypto(callback: CallbackQuery):
         else:
             text += '\n\nДля оплаты тарифа перейдите по ссылке:'
         pay_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=f"💎 Оплатить криптовалютой ({rub_amount} ₽)", url=result['url'])]
+            [InlineKeyboardButton(
+                text=f"💎 Оплатить криптовалютой ({rub_amount} ₽)",
+                url=result['url'],
+                style=STYLE_SUCCESS,
+            )]
         ])
         await callback.message.edit_text(text, reply_markup=pay_keyboard)
         logger.info(f"Юзер {user_id} создал счет в Cryptobot на {rub_amount} руб {'(подарок)' if gift_flag else ''}")

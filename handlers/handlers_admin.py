@@ -502,6 +502,75 @@ async def check_users_command(message: Message):
         await message.answer(f"❌ Ошибка: {str(e)}")
 
 
+@router.message(Command(commands=['shortuuid_export']))
+async def shortuuid_export_command(message: Message):
+    """Синхронизация shortUuid из панели в поля subscribtion / white_subscription в БД."""
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    await message.answer("🔄 Загружаю пользователей из панели и обновляю shortUuid в БД...")
+
+    try:
+        panel_users = await x3.get_all_users()
+        updated_sub = 0
+        updated_white = 0
+        skipped_no_telegram = 0
+        not_in_db = 0
+        skipped_no_short = 0
+        errors = 0
+
+        for panel_user in panel_users:
+            tg_raw = panel_user.get("telegramId")
+            if tg_raw is None:
+                skipped_no_telegram += 1
+                continue
+            try:
+                tg_id = int(tg_raw)
+            except (TypeError, ValueError):
+                skipped_no_telegram += 1
+                continue
+
+            if not await sql.SELECT_ID(tg_id):
+                not_in_db += 1
+                continue
+
+            short_uuid = panel_user.get("shortUuid") or panel_user.get("shortuuid")
+            if not short_uuid:
+                skipped_no_short += 1
+                continue
+
+            username = (panel_user.get("username") or "").strip()
+            is_white = username.endswith("_white")
+
+            try:
+                if is_white:
+                    await sql.update_white_subscription(tg_id, short_uuid)
+                    updated_white += 1
+                else:
+                    await sql.update_subscribtion(tg_id, short_uuid)
+                    updated_sub += 1
+            except Exception as e:
+                errors += 1
+                logger.error(f"/shortuuid_export: ошибка для tg_id={tg_id}: {e}")
+
+        report = (
+            f"✅ Готово.\n"
+            f"👥 Записей в панели (после фильтра): {len(panel_users)}\n"
+            f"📝 subscribtion обновлено: {updated_sub}\n"
+            f"📝 white_subscription обновлено: {updated_white}\n"
+            f"⏭ Без telegramId: {skipped_no_telegram}\n"
+            f"⏭ Нет в БД: {not_in_db}\n"
+            f"⏭ Нет shortUuid в панели: {skipped_no_short}\n"
+            f"❌ Ошибок записи: {errors}"
+        )
+        await message.answer(report)
+        logger.info(f"Админ {message.from_user.id} выполнил /shortuuid_export: {report}")
+
+    except Exception as e:
+        logger.exception("Ошибка в /shortuuid_export")
+        await message.answer(f"❌ Ошибка: {str(e)}")
+
+
 @router.message(Command(commands=['update_delete']))
 async def check_users_command(message: Message):
     """Проверка соответствия дат окончания подписки у оплаченных пользователей (has_discount=True)"""

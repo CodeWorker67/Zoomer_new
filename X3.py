@@ -1,11 +1,13 @@
+import base64
 import datetime
 import hashlib
+import hmac
 import uuid
 
 import urllib3
 import aiohttp
 
-from config import PANEL_API_TOKEN, PANEL_URL
+from config import PANEL_API_TOKEN, PANEL_URL, SHORT_UUID_SECRET
 from config_bd.utils import AsyncSQL
 from logging_config import logger
 import random
@@ -49,9 +51,16 @@ class X3:
             await self._session.close()
 
     def generate_client_id(self, tg_id):
-        tg_id_str = str(tg_id).encode('utf-8')
-        hash_object = hashlib.sha1(tg_id_str)
-        return hash_object.hexdigest()[:9]
+        """shortUuid: HMAC-SHA256(секрет, tg_id), 15 символов; white — тот же метод с tg_id*100."""
+        if not SHORT_UUID_SECRET:
+            raise ValueError(
+                "SHORT_UUID_SECRET не задан в окружении (.env) — нужен для генерации shortUuid"
+            )
+        key = str(SHORT_UUID_SECRET).encode("utf-8")
+        msg = str(int(tg_id)).encode("utf-8")
+        digest = hmac.new(key, msg, hashlib.sha256).digest()
+        token = base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+        return token[:15]
 
     def list_from_host(self, host):
         """Заглушка для совместимости со старым кодом"""
@@ -163,8 +172,10 @@ class X3:
                         subscription_end_date = expire_time.replace(tzinfo=datetime.timezone.utc)
                         if 'white' in user_id_str:
                             await sql.update_white_subscription_end_date(user_id, subscription_end_date)
+                            await sql.update_white_subscription(user_id, client_id)
                         else:
                             await sql.update_subscription_end_date(user_id, subscription_end_date)
+                            await sql.update_subscription(user_id, client_id)
                         logger.info(f"✅ Клиент {user_id} успешно добавлен (без JSON)")
                         return True
                     else:
@@ -172,8 +183,10 @@ class X3:
                             subscription_end_date = expire_time.replace(tzinfo=datetime.timezone.utc)
                             if 'white' in user_id_str:
                                 await sql.update_white_subscription_end_date(user_id, subscription_end_date)
+                                await sql.update_white_subscription(user_id, client_id)
                             else:
                                 await sql.update_subscription_end_date(user_id, subscription_end_date)
+                                await sql.update_subscription(user_id, client_id)
                             logger.info(f"✅ Клиент {user_id} успешно добавлен")
                             return True
                         else:

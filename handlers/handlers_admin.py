@@ -546,8 +546,10 @@ async def shortuuid_export_command(message: Message):
                 if is_white:
                     await sql.update_white_subscription(tg_id, short_uuid)
                     updated_white += 1
+                    logger.info(f"white_subscription обновлен для tg_id={tg_id}: {short_uuid}")
                 else:
                     await sql.update_subscribtion(tg_id, short_uuid)
+                    logger.info(f"subscribtion обновлен для tg_id={tg_id}: {short_uuid}")
                     updated_sub += 1
             except Exception as e:
                 errors += 1

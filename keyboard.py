@@ -62,7 +62,7 @@ def keyboard_start_bonus():
         1,
         styles={"free_vpn": STYLE_SUCCESS, "buy_vpn": STYLE_SUCCESS},
         free_vpn='🔥 Попробовать бесплатно',
-        buy_vpn='🛒 Купить подписку',
+        buy_vpn='💰 Купить подписку',
     )
 
 
@@ -75,9 +75,9 @@ def keyboard_start():
             "ref": STYLE_PRIMARY,
             "buy_gift": STYLE_SUCCESS,
         },
-        buy_vpn='🛒 Купить подписку',
+        buy_vpn='💰 Купить подписку',
         connect_vpn='🔗 Подключить VPN',
-        ref='👥 Рефералка',
+        ref='👫 Рефералка',
         buy_gift='🎁 Подарить подписку',
     )
 
@@ -338,7 +338,7 @@ def keyboard_payment_cancel():
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
-                text="🛒 Купить подписку",
+                text="💰 Купить подписку",
                 callback_data="buy_vpn",
                 style=STYLE_PRIMARY,
             )

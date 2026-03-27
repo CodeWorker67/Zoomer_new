@@ -154,10 +154,10 @@ async def broadcast_confirm_send(callback: CallbackQuery, state: FSMContext, bot
         keyboard_broadcast = create_kb(1, connect_vpn='🔗 Подключить VPN')
     elif selected_parameter == 'not_connected_subscribe_off':
         user_ids = await sql.SELECT_NOT_CONNECTED_SUBSCRIBE_OFF()
-        keyboard_broadcast = create_kb(1, buy_vpn='🛒 Купить подписку')
+        keyboard_broadcast = create_kb(1, buy_vpn='💰 Купить подписку')
     elif selected_parameter == 'connected_subscribe_off':
         user_ids = await sql.SELECT_CONNECTED_SUBSCRIBE_OFF()
-        keyboard_broadcast = create_kb(1, buy_vpn='🛒 Купить подписку')
+        keyboard_broadcast = create_kb(1, buy_vpn='💰 Купить подписку')
     elif selected_parameter == 'connected_subscribe_yes':
         user_ids = await sql.SELECT_CONNECTED_SUBSCRIBE_YES()
         keyboard_broadcast = None

@@ -25,7 +25,11 @@ class AsyncSQL:
                     user.is_admin, user.has_discount, user.subscription_end_date,
                     user.white_subscription_end_date, user.last_notification_date,
                     user.last_broadcast_status, user.last_broadcast_date,
-                    user.stamp, user.ttclid
+                    user.stamp, user.ttclid,
+                    user.subscribtion, user.white_subscription, user.email,
+                    user.password, user.activation_pass,
+                    user.field_str_1, user.field_str_2, user.field_str_3,
+                    user.field_bool_1, user.field_bool_2, user.field_bool_3,
                 )
             return None
 

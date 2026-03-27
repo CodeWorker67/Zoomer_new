@@ -1,12 +1,14 @@
+import asyncio
 import calendar
+import os
+import tempfile
 from datetime import datetime
-from io import BytesIO
 from typing import Optional
 
 import openpyxl
 from aiogram import Router
 from aiogram.filters import Command
-from aiogram.types import Message, BufferedInputFile
+from aiogram.types import Message, FSInputFile
 from openpyxl.styles import Alignment, Border, Side, PatternFill
 from openpyxl.chart import LineChart, BarChart, Reference
 from sqlalchemy import select, func
@@ -60,6 +62,160 @@ class PaymentRecord:
         self.amount = amount
         self.is_gift = is_gift
         self.time_created = time_created
+
+
+def _sync_build_analytics_excel(monthly_data: dict, daily_data_by_month: dict) -> str:
+    wb = openpyxl.Workbook()
+    ws_main = wb.active
+    ws_main.title = "Помесячная аналитика"
+
+    headers = ['Показатель'] + list(monthly_data.keys())
+    ws_main.append(headers)
+
+    metric_rows = [
+        ('Новые пользователи (всего)', 'new_total'),
+        ('Новые пользователи (залив)', 'new_zaliv'),
+        ('Новые пользователи (сарафан)', 'new_saraf'),
+        ('Взяли ключ (всего)', 'key_total'),
+        ('Взяли ключ (залив)', 'key_zaliv'),
+        ('Взяли ключ (сарафан)', 'key_saraf'),
+        ('Подключились (всего)', 'connect_total'),
+        ('Подключились (залив)', 'connect_zaliv'),
+        ('Подключились (сарафан)', 'connect_saraf'),
+        ('Платежи новых (сумма, всего)', 'pay_new_sum_total'),
+        ('Платежи новых (уникальных, всего)', 'pay_new_users_total'),
+        ('Платежи новых (сумма, залив)', 'pay_new_sum_zaliv'),
+        ('Платежи новых (уникальных, залив)', 'pay_new_users_zaliv'),
+        ('Платежи новых (сумма, сарафан)', 'pay_new_sum_saraf'),
+        ('Платежи новых (уникальных, сарафан)', 'pay_new_users_saraf'),
+        ('Общая выручка (₽)', 'total_revenue'),
+        ('Количество платежей', 'total_payments'),
+        ('AOV (₽)', 'aov'),
+        ('ARPU (₽)', 'arpu'),
+        ('Пользователей на конец месяца', 'cumulative_users'),
+        ('Платежей 99₽ (шт)', 'sum_99_count'),
+        ('Сумма 99₽ (₽)', 'sum_99_amount'),
+        ('Платежей 269₽ (шт)', 'sum_269_count'),
+        ('Сумма 269₽ (₽)', 'sum_269_amount'),
+        ('Платежей 299₽ (шт)', 'sum_299_count'),
+        ('Сумма 299₽ (₽)', 'sum_299_amount'),
+        ('Платежей 499₽ (шт)', 'sum_499_count'),
+        ('Сумма 499₽ (₽)', 'sum_499_amount'),
+        ('Подарков (шт)', 'gift_count'),
+        ('Сумма подарков (₽)', 'gift_amount'),
+    ]
+
+    row_idx = 2
+    for label, key in metric_rows:
+        row = [label]
+        ws_main.append(row)
+        col_idx = 2
+        for month in monthly_data.keys():
+            value = monthly_data[month].get(key, 0)
+            if key in ('aov', 'arpu'):
+                cell_value = round(value, 2)
+            else:
+                cell_value = value if isinstance(value, int) else round(value, 2)
+            ws_main.cell(row=row_idx, column=col_idx, value=cell_value)
+            col_idx += 1
+        row_idx += 1
+
+    yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+    light_green_fill = PatternFill(start_color="CCFFCC", end_color="CCFFCC", fill_type="solid")
+    light_red_fill = PatternFill(start_color="FFCCCC", end_color="FFCCCC", fill_type="solid")
+    thin_border = Border(left=Side(style='thin'), right=Side(style='thin'),
+                         top=Side(style='thin'), bottom=Side(style='thin'))
+
+    for cell in ws_main[1]:
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = thin_border
+
+    month_columns = list(monthly_data.keys())
+    for r in range(2, row_idx):
+        for c in range(1, ws_main.max_column + 1):
+            ws_main.cell(row=r, column=c).border = thin_border
+        jan_cell = ws_main.cell(row=r, column=2)
+        jan_cell.fill = yellow_fill
+        for col_idx in range(3, 2 + len(month_columns)):
+            current = ws_main.cell(row=r, column=col_idx)
+            prev = ws_main.cell(row=r, column=col_idx - 1)
+            try:
+                cur_val = float(current.value)
+                prev_val = float(prev.value)
+            except (TypeError, ValueError):
+                continue
+            if cur_val > prev_val:
+                current.fill = light_green_fill
+            elif cur_val < prev_val:
+                current.fill = light_red_fill
+
+    for col in ws_main.columns:
+        max_len = 0
+        col_letter = col[0].column_letter
+        for cell in col:
+            if cell.value:
+                max_len = max(max_len, len(str(cell.value)))
+        ws_main.column_dimensions[col_letter].width = min(max_len + 2, 50)
+
+    ws_main.freeze_panes = 'B2'
+
+    for month_key, daily_data in daily_data_by_month.items():
+        ws = wb.create_sheet(title=month_key[:31])
+        ws.append(['День', 'Новые', 'Взяли ключ', 'Подключились', 'Платили',
+                   'Всего пользователей (накопительно)', 'Всего ключей (накопительно)', 'Всего подключений (накопительно)'])
+        for d in daily_data:
+            ws.append([
+                d['day'],
+                d['new'],
+                d['key'],
+                d['connect'],
+                d['paid'],
+                d['cum_users'],
+                d['cum_key'],
+                d['cum_connect']
+            ])
+
+        for row in ws.iter_rows(min_row=1, max_row=len(daily_data) + 1, min_col=1, max_col=8):
+            for cell in row:
+                cell.border = thin_border
+
+        for col in ws.columns:
+            max_len = 0
+            col_letter = col[0].column_letter
+            for cell in col:
+                if cell.value:
+                    max_len = max(max_len, len(str(cell.value)))
+            ws.column_dimensions[col_letter].width = min(max_len + 2, 20)
+
+        chart1 = LineChart()
+        chart1.title = "Накопительные показатели"
+        chart1.style = 13
+        chart1.y_axis.title = "Количество"
+        chart1.x_axis.title = "День месяца"
+        data = Reference(ws, min_col=6, max_col=8, min_row=1, max_row=len(daily_data) + 1)
+        dates = Reference(ws, min_col=1, min_row=2, max_row=len(daily_data) + 1)
+        chart1.add_data(data, titles_from_data=True)
+        chart1.set_categories(dates)
+        if len(chart1.series) >= 3:
+            chart1.series[0].graphicalProperties.line.solidFill = "0000FF"
+            chart1.series[1].graphicalProperties.line.solidFill = "00B0F0"
+            chart1.series[2].graphicalProperties.line.solidFill = "000000"
+        ws.add_chart(chart1, "J2")
+
+        chart2 = BarChart()
+        chart2.title = "Ежедневные показатели"
+        chart2.style = 13
+        chart2.y_axis.title = "Количество"
+        chart2.x_axis.title = "День месяца"
+        data2 = Reference(ws, min_col=2, max_col=5, min_row=1, max_row=len(daily_data) + 1)
+        chart2.add_data(data2, titles_from_data=True)
+        chart2.set_categories(dates)
+        ws.add_chart(chart2, "J20")
+
+    fd, path = tempfile.mkstemp(suffix='.xlsx')
+    os.close(fd)
+    wb.save(path)
+    return path
 
 
 @router.message(Command(commands=['stat']))
@@ -415,6 +571,8 @@ async def analytics_export(message: Message):
                 cum_key_before = sum(1 for u in users_before if u.is_pay_null)
                 cum_connect_before = sum(1 for u in users_before if u.is_tarif)
 
+                await session.commit()
+
                 daily_cumulative = []
                 cum_users = cum_users_before
                 cum_key = cum_key_before
@@ -437,169 +595,22 @@ async def analytics_export(message: Message):
 
                 daily_data_by_month[month_key] = daily_cumulative
 
-        # --- Создание Excel файла ---
-        wb = openpyxl.Workbook()
-        ws_main = wb.active
-        ws_main.title = "Помесячная аналитика"
-
-        headers = ['Показатель'] + list(monthly_data.keys())
-        ws_main.append(headers)
-
-        metric_rows = [
-            ('Новые пользователи (всего)', 'new_total'),
-            ('Новые пользователи (залив)', 'new_zaliv'),
-            ('Новые пользователи (сарафан)', 'new_saraf'),
-            ('Взяли ключ (всего)', 'key_total'),
-            ('Взяли ключ (залив)', 'key_zaliv'),
-            ('Взяли ключ (сарафан)', 'key_saraf'),
-            ('Подключились (всего)', 'connect_total'),
-            ('Подключились (залив)', 'connect_zaliv'),
-            ('Подключились (сарафан)', 'connect_saraf'),
-            ('Платежи новых (сумма, всего)', 'pay_new_sum_total'),
-            ('Платежи новых (уникальных, всего)', 'pay_new_users_total'),
-            ('Платежи новых (сумма, залив)', 'pay_new_sum_zaliv'),
-            ('Платежи новых (уникальных, залив)', 'pay_new_users_zaliv'),
-            ('Платежи новых (сумма, сарафан)', 'pay_new_sum_saraf'),
-            ('Платежи новых (уникальных, сарафан)', 'pay_new_users_saraf'),
-            ('Общая выручка (₽)', 'total_revenue'),
-            ('Количество платежей', 'total_payments'),
-            ('AOV (₽)', 'aov'),
-            ('ARPU (₽)', 'arpu'),
-            ('Пользователей на конец месяца', 'cumulative_users'),
-            ('Платежей 99₽ (шт)', 'sum_99_count'),
-            ('Сумма 99₽ (₽)', 'sum_99_amount'),
-            ('Платежей 269₽ (шт)', 'sum_269_count'),
-            ('Сумма 269₽ (₽)', 'sum_269_amount'),
-            ('Платежей 299₽ (шт)', 'sum_299_count'),
-            ('Сумма 299₽ (₽)', 'sum_299_amount'),
-            ('Платежей 499₽ (шт)', 'sum_499_count'),
-            ('Сумма 499₽ (₽)', 'sum_499_amount'),
-            ('Подарков (шт)', 'gift_count'),
-            ('Сумма подарков (₽)', 'gift_amount'),
-        ]
-
-        row_idx = 2
-        for label, key in metric_rows:
-            row = [label]
-            ws_main.append(row)
-            col_idx = 2
-            for month in monthly_data.keys():
-                value = monthly_data[month].get(key, 0)
-                if key in ('aov', 'arpu'):
-                    cell_value = round(value, 2)
-                else:
-                    cell_value = value if isinstance(value, int) else round(value, 2)
-                ws_main.cell(row=row_idx, column=col_idx, value=cell_value)
-                col_idx += 1
-            row_idx += 1
-
-        # Оформление
-        yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
-        light_green_fill = PatternFill(start_color="CCFFCC", end_color="CCFFCC", fill_type="solid")
-        light_red_fill = PatternFill(start_color="FFCCCC", end_color="FFCCCC", fill_type="solid")
-        thin_border = Border(left=Side(style='thin'), right=Side(style='thin'),
-                             top=Side(style='thin'), bottom=Side(style='thin'))
-
-        for cell in ws_main[1]:
-            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-            cell.border = thin_border
-
-        month_columns = list(monthly_data.keys())
-        for r in range(2, row_idx):
-            for c in range(1, ws_main.max_column + 1):
-                ws_main.cell(row=r, column=c).border = thin_border
-            jan_cell = ws_main.cell(row=r, column=2)
-            jan_cell.fill = yellow_fill
-            for col_idx in range(3, 2 + len(month_columns)):
-                current = ws_main.cell(row=r, column=col_idx)
-                prev = ws_main.cell(row=r, column=col_idx-1)
-                try:
-                    cur_val = float(current.value)
-                    prev_val = float(prev.value)
-                except (TypeError, ValueError):
-                    continue
-                if cur_val > prev_val:
-                    current.fill = light_green_fill
-                elif cur_val < prev_val:
-                    current.fill = light_red_fill
-
-        for col in ws_main.columns:
-            max_len = 0
-            col_letter = col[0].column_letter
-            for cell in col:
-                if cell.value:
-                    max_len = max(max_len, len(str(cell.value)))
-            ws_main.column_dimensions[col_letter].width = min(max_len + 2, 50)
-
-        ws_main.freeze_panes = 'B2'
-
-        # Листы по месяцам с графиками
-        for month_key, daily_data in daily_data_by_month.items():
-            ws = wb.create_sheet(title=month_key[:31])
-            ws.append(['День', 'Новые', 'Взяли ключ', 'Подключились', 'Платили',
-                       'Всего пользователей (накопительно)', 'Всего ключей (накопительно)', 'Всего подключений (накопительно)'])
-            for d in daily_data:
-                ws.append([
-                    d['day'],
-                    d['new'],
-                    d['key'],
-                    d['connect'],
-                    d['paid'],
-                    d['cum_users'],
-                    d['cum_key'],
-                    d['cum_connect']
-                ])
-
-            for row in ws.iter_rows(min_row=1, max_row=len(daily_data)+1, min_col=1, max_col=8):
-                for cell in row:
-                    cell.border = thin_border
-
-            for col in ws.columns:
-                max_len = 0
-                col_letter = col[0].column_letter
-                for cell in col:
-                    if cell.value:
-                        max_len = max(max_len, len(str(cell.value)))
-                ws.column_dimensions[col_letter].width = min(max_len + 2, 20)
-
-            # Линейный график (накопительные)
-            chart1 = LineChart()
-            chart1.title = "Накопительные показатели"
-            chart1.style = 13
-            chart1.y_axis.title = "Количество"
-            chart1.x_axis.title = "День месяца"
-            data = Reference(ws, min_col=6, max_col=8, min_row=1, max_row=len(daily_data)+1)
-            dates = Reference(ws, min_col=1, min_row=2, max_row=len(daily_data)+1)
-            chart1.add_data(data, titles_from_data=True)
-            chart1.set_categories(dates)
-            if len(chart1.series) >= 3:
-                chart1.series[0].graphicalProperties.line.solidFill = "0000FF"
-                chart1.series[1].graphicalProperties.line.solidFill = "00B0F0"
-                chart1.series[2].graphicalProperties.line.solidFill = "000000"
-            ws.add_chart(chart1, "J2")
-
-            # Столбцовая диаграмма (ежедневные)
-            chart2 = BarChart()
-            chart2.title = "Ежедневные показатели"
-            chart2.style = 13
-            chart2.y_axis.title = "Количество"
-            chart2.x_axis.title = "День месяца"
-            data2 = Reference(ws, min_col=2, max_col=5, min_row=1, max_row=len(daily_data)+1)
-            chart2.add_data(data2, titles_from_data=True)
-            chart2.set_categories(dates)
-            ws.add_chart(chart2, "J20")
-
-        excel_file = BytesIO()
-        wb.save(excel_file)
-        excel_file.seek(0)
-
-        await message.answer_document(
-            document=BufferedInputFile(
-                excel_file.read(),
-                filename=f"analytics_{current_year}_{current_month}.xlsx"
-            ),
-            caption=f"📊 Помесячная аналитика с января {current_year} по {now.strftime('%B %Y')}"
+        export_path = await asyncio.to_thread(
+            _sync_build_analytics_excel, monthly_data, daily_data_by_month
         )
+        try:
+            await message.answer_document(
+                document=FSInputFile(
+                    export_path,
+                    filename=f"analytics_{current_year}_{current_month}.xlsx",
+                ),
+                caption=f"📊 Помесячная аналитика с января {current_year} по {now.strftime('%B %Y')}",
+            )
+        finally:
+            try:
+                os.remove(export_path)
+            except OSError:
+                pass
 
         logger.info(f"Админ {message.from_user.id} выгрузил помесячную аналитику")
 

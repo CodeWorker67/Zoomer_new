@@ -2,7 +2,7 @@ import uuid
 
 from sqlalchemy import select, update, func
 from datetime import datetime, date
-from typing import Optional, List, Tuple, Dict
+from typing import Any, Optional, List, Tuple, Dict
 
 from config_bd.models import AsyncSessionLocal, Users, Payments, Gifts, PaymentsCryptobot, PaymentsStars, Online, \
     WhiteCounter, PaymentsCards, PaymentsPlategaCrypto
@@ -812,6 +812,33 @@ class AsyncSQL:
         async with self.session_factory() as session:
             result = await session.execute(select(WhiteCounter))
             return result.scalars().all()
+
+    async def get_export_snapshot(self) -> Dict[str, List[Any]]:
+        """
+        Одна сессия БД: все SELECT для /export подряд.
+        Меньше открытий соединения, чем несколько отдельных get_all_*.
+        """
+        async with self.session_factory() as session:
+            users_list = (await session.execute(select(Users))).scalars().all()
+            payments_list = (await session.execute(select(Payments))).scalars().all()
+            payments_cards_list = (await session.execute(select(PaymentsCards))).scalars().all()
+            payments_platega_crypto_list = (await session.execute(select(PaymentsPlategaCrypto))).scalars().all()
+            payments_stars_list = (await session.execute(select(PaymentsStars))).scalars().all()
+            payments_cryptobot_list = (await session.execute(select(PaymentsCryptobot))).scalars().all()
+            gifts_list = (await session.execute(select(Gifts))).scalars().all()
+            online_list = (await session.execute(select(Online))).scalars().all()
+            white_counter_list = (await session.execute(select(WhiteCounter))).scalars().all()
+        return {
+            "users": users_list,
+            "payments": payments_list,
+            "payments_cards": payments_cards_list,
+            "payments_platega_crypto": payments_platega_crypto_list,
+            "payments_stars": payments_stars_list,
+            "payments_cryptobot": payments_cryptobot_list,
+            "gifts": gifts_list,
+            "online": online_list,
+            "white_counter": white_counter_list,
+        }
 
     async def add_white_counter_if_not_exists(self, user_id: int) -> None:
         """

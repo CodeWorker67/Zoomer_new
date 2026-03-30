@@ -2,7 +2,7 @@ import urllib.parse
 
 from bot import sql
 from config import ADMIN_IDS
-from keyboard import create_kb, keyboard_tariff_old, keyboard_tariff, STYLE_SUCCESS
+from keyboard import create_kb, keyboard_tariff_old, keyboard_tariff, STYLE_PRIMARY, STYLE_SUCCESS
 from logging_config import logger
 import asyncio
 from aiogram import Router, Bot, F
@@ -148,7 +148,24 @@ async def broadcast_confirm_send(callback: CallbackQuery, state: FSMContext, bot
     # Получаем пользователей по выбранному параметру
     if selected_parameter == "all_users":
         user_ids = await sql.SELECT_ALL_USERS()  # Получаем всех пользователей
-        keyboard_broadcast = create_kb(1, buy_gift='🎁 Подарить подписку', r_120='🔥 Акция: 120 дней - 269 руб')
+        keyboard_broadcast = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="💰 Купить подписку",
+                        callback_data="buy_vpn",
+                        style=STYLE_SUCCESS,
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="🌐 Наш сайт",
+                        url="https://4zoomer.top",
+                        style=STYLE_PRIMARY,
+                    )
+                ],
+            ]
+        )
     elif selected_parameter == 'not_connected_subscribe_yes':
         user_ids = await sql.SELECT_NOT_CONNECTED_SUBSCRIBE_YES()
         keyboard_broadcast = create_kb(1, connect_vpn='🔗 Подключить VPN')

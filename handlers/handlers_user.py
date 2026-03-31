@@ -176,7 +176,7 @@ async def referral_program(callback: CallbackQuery):
     count = await sql.SELECT_COUNT_REF(int(callback.from_user.id))
     await callback.message.answer(
         text=lexicon['ref_info'].format(count, callback.from_user.id),
-        reply_markup=ref_keyboard(),
+        reply_markup=ref_keyboard(callback.from_user.id),
         disable_web_page_preview=True
     )
 

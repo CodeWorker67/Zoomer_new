@@ -1,6 +1,9 @@
+import urllib.parse
 from typing import List, Optional
 
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+from config import BOT_URL
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 STYLE_PRIMARY = "primary"
@@ -448,17 +451,19 @@ def keyboard_payment_stars(stars_amount):
     ])
 
 
-def ref_keyboard():
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(
-                text="Пригласить друзей🫶",
-                switch_inline_query="partner",
-                style=STYLE_SUCCESS,
-            )
-        ],
-        [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")]
-    ])
+def ref_keyboard(user_id):
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Пригласить друзей🫶",
+                    url=f"https://t.me/share/url?url={BOT_URL}?start=ref{user_id}&text={urllib.parse.quote('Вот ссылка для тебя на надёжный VPN!')}",
+                    style=STYLE_SUCCESS,
+                )
+            ],
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")],
+        ]
+    )
     return keyboard
 
 

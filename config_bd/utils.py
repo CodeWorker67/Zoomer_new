@@ -1,7 +1,7 @@
 import uuid
 
-from sqlalchemy import select, update, func
-from datetime import datetime, date
+from sqlalchemy import select, update, func, and_, or_
+from datetime import datetime, date, timedelta, timezone
 from typing import Any, Optional, List, Tuple, Dict
 
 from config_bd.models import AsyncSessionLocal, Users, Payments, Gifts, PaymentsCryptobot, PaymentsStars, Online, \
@@ -162,7 +162,14 @@ class AsyncSQL:
 
     async def mark_notification_as_sent(self, user_id: int):
         async with self.session_factory() as session:
-            stmt = update(Users).where(Users.user_id == user_id).values(last_notification_date=date.today())
+            utc_today = datetime.now(timezone.utc).date()
+            stmt = update(Users).where(Users.user_id == user_id).values(last_notification_date=utc_today)
+            await session.execute(stmt)
+            await session.commit()
+
+    async def update_field_str_1(self, user_id: int, value: Optional[str]):
+        async with self.session_factory() as session:
+            stmt = update(Users).where(Users.user_id == user_id).values(field_str_1=value)
             await session.execute(stmt)
             await session.commit()
 
@@ -191,6 +198,82 @@ class AsyncSQL:
             )
             result = await session.execute(stmt)
             return [row[0] for row in result.all()]
+
+    async def select_rows_for_subscription_expiry_push(
+        self, now_utc_naive: datetime, window: timedelta
+    ) -> List[Tuple[int, datetime, bool, Optional[str], Optional[str]]]:
+        """
+        Строки для sheduler.time_mes без N× get_user: user_id, subscription_end_date,
+        is_pay_null (оплачивал / клава тарифа), ttclid, field_str_1 (JSON состояния push).
+
+        Фильтр по времени (как _in_send_window в Python, moment <= now < moment + window):
+        — Подписка активна: end попадает в одно из окон «за 7 / 3 / 1 день» или «за 1 час».
+        — Подписка истекла: end попадает в окно second_chance (+7 дн) или post-expiry p1..p200 (+3n дн).
+        """
+        w = window
+        now = now_utc_naive
+
+        active_7 = and_(
+            Users.subscription_end_date > now,
+            Users.subscription_end_date > now + timedelta(days=7) - w,
+            Users.subscription_end_date <= now + timedelta(days=7),
+        )
+        active_3 = and_(
+            Users.subscription_end_date > now,
+            Users.subscription_end_date > now + timedelta(days=3) - w,
+            Users.subscription_end_date <= now + timedelta(days=3),
+        )
+        active_1 = and_(
+            Users.subscription_end_date > now,
+            Users.subscription_end_date > now + timedelta(days=1) - w,
+            Users.subscription_end_date <= now + timedelta(days=1),
+        )
+        active_h = and_(
+            Users.subscription_end_date > now,
+            Users.subscription_end_date > now + timedelta(hours=1) - w,
+            Users.subscription_end_date <= now + timedelta(hours=1),
+        )
+        active_cond = or_(active_7, active_3, active_1, active_h)
+
+        post_second = and_(
+            Users.subscription_end_date <= now,
+            Users.subscription_end_date > now - timedelta(days=7) - w,
+            Users.subscription_end_date <= now - timedelta(days=7),
+        )
+        post_pn = []
+        for n in range(1, 201):
+            d = timedelta(days=3 * n)
+            post_pn.append(
+                and_(
+                    Users.subscription_end_date <= now,
+                    Users.subscription_end_date > now - d - w,
+                    Users.subscription_end_date <= now - d,
+                )
+            )
+        expired_cond = or_(post_second, *post_pn)
+
+        async with self.session_factory() as session:
+            stmt = (
+                select(
+                    Users.user_id,
+                    Users.subscription_end_date,
+                    Users.is_pay_null,
+                    Users.ttclid,
+                    Users.field_str_1,
+                )
+                .where(
+                    Users.is_delete == False,
+                    Users.subscription_end_date.isnot(None),
+                    or_(active_cond, expired_cond),
+                )
+                .order_by(Users.user_id)
+            )
+            result = await session.execute(stmt)
+            rows = result.all()
+            return [
+                (r[0], r[1], bool(r[2]), r[3], r[4])
+                for r in rows
+            ]
 
     async def SELECT_NOT_CONNECTED_SUBSCRIBE_YES(self) -> List[int]:
         async with self.session_factory() as session:

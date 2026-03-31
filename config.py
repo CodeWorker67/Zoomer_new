@@ -15,3 +15,4 @@ CRYPTOBOT_API_TOKEN: Optional[str] = os.environ.get("CRYPTOBOT_API_TOKEN")
 PANEL_URL: Optional[str] = os.environ.get("PANEL_URL")
 PANEL_API_TOKEN: Optional[str] = os.environ.get("PANEL_API_TOKEN")
 SHORT_UUID_SECRET: Optional[str] = os.environ.get("SHORT_UUID_SECRET")
+BOT_URL: str = os.environ.get("BOT_URL") or "https://t.me/zoomerskyvpn_bot"

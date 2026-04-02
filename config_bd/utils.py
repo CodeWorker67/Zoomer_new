@@ -9,6 +9,9 @@ from config_bd.models import AsyncSessionLocal, Users, Payments, Gifts, Payments
     WhiteCounter, PaymentsCards, PaymentsPlategaCrypto
 from logging_config import logger
 
+# Размер батча для IN (...) в PostgreSQL (очень длинные списки режутся).
+_STAT_IN_CHUNK = 8000
+
 
 def _naive_utc(dt: datetime) -> datetime:
     """asyncpg + TIMESTAMP WITHOUT TIME ZONE: только naive datetime; время в UTC."""
@@ -473,30 +476,37 @@ class AsyncSQL:
         with_sub = 0
         with_tarif = 0
         with_tarif_not_blocked = 0
-
-        for user_id in users:
-            user_data = await self.get_user(user_id)
-            if user_data:
-                if user_data[9] is not None:
-                    with_sub += 1
-                if user_data[5]:  # is_connect
-                    with_tarif += 1
-                if user_data[5] and not user_data[3]:
-                    with_tarif_not_blocked +=1
-        with_tarif = with_tarif // 2
-        with_tarif_not_blocked = with_tarif_not_blocked // 2
-
-        # Сумма подтверждённых платежей этих пользователей
         total_payments = 0
-        if users:
-            async with self.session_factory() as session:
-                stmt = select(func.coalesce(func.sum(Payments.amount), 0)).where(
-                    Payments.user_id.in_(users),
-                    Payments.status == 'confirmed'
+
+        async with self.session_factory() as session:
+            for i in range(0, len(users), _STAT_IN_CHUNK):
+                chunk = users[i : i + _STAT_IN_CHUNK]
+                stmt_users = select(
+                    Users.subscription_end_date,
+                    Users.is_connect,
+                    Users.is_delete,
+                ).where(Users.user_id.in_(chunk))
+                result = await session.execute(stmt_users)
+                for sub_end, is_connect, is_delete in result.all():
+                    if sub_end is not None:
+                        with_sub += 1
+                    if is_connect:
+                        with_tarif += 1
+                    if is_connect and not is_delete:
+                        with_tarif_not_blocked += 1
+
+            with_tarif //= 2
+            with_tarif_not_blocked //= 2
+
+            for i in range(0, len(users), _STAT_IN_CHUNK):
+                chunk = users[i : i + _STAT_IN_CHUNK]
+                stmt_pay = select(func.coalesce(func.sum(Payments.amount), 0)).where(
+                    Payments.user_id.in_(chunk),
+                    Payments.status == 'confirmed',
                 )
-                result = await session.execute(stmt)
-                total_payments = result.scalar() or 0
-                total_payments = total_payments // 2
+                total_payments += (await session.execute(stmt_pay)).scalar() or 0
+
+        total_payments //= 2
 
         return total, with_sub, with_tarif, with_tarif_not_blocked, total_payments, source
 

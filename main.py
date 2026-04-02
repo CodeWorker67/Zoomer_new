@@ -1,9 +1,12 @@
 import asyncio
+
+import uvicorn
 from aiogram import Bot, Dispatcher
 from aiogram.types import BotCommand
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from bot import bot
+from config import WEB_API_PORT
 from config_bd.models import create_tables, engine
 from payments import pay_stars, pay_cryptobot, pay_platega
 from sheduler.check_connect import check_connect
@@ -14,6 +17,7 @@ from handlers import handlers_user, handlers_statistic, handlers_admin, handlers
 from sheduler.time_mes import send_message_cron
 from logging_config import logger
 from sheduler.time_mes_not_sub import send_push_cron
+from web_api import app as web_app
 
 
 async def set_commands(bot: Bot):
@@ -52,14 +56,19 @@ async def main() -> None:
 
     await set_commands(bot)
 
+    uv_config = uvicorn.Config(web_app, host="0.0.0.0", port=WEB_API_PORT)
+    server = uvicorn.Server(uv_config)
+
     try:
-        # Пропуск накопившихся апдейтов и запуск polling
         await bot.delete_webhook(drop_pending_updates=True)
-        logger.info("Bot start polling.")
-        await dp.start_polling(bot)
+        logger.info("Bot start polling, web API on port %s.", WEB_API_PORT)
+        bot_task = asyncio.create_task(dp.start_polling(bot))
+        api_task = asyncio.create_task(server.serve())
+        await asyncio.gather(bot_task, api_task)
     except asyncio.CancelledError:
         logger.error("Polling was cancelled. Cleaning up...")
     finally:
+        server.should_exit = True
         await bot.session.close()
         await engine.dispose()
         logger.info("Bot session closed, DB pool disposed.")

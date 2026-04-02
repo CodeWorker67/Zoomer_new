@@ -18,6 +18,9 @@ PANEL_API_TOKEN: Optional[str] = os.environ.get("PANEL_API_TOKEN")
 SHORT_UUID_SECRET: Optional[str] = os.environ.get("SHORT_UUID_SECRET")
 BOT_URL: str = os.environ.get("BOT_URL") or "https://t.me/zoomerskyvpn_bot"
 
+JWT_SECRET: Optional[str] = os.environ.get("JWT_SECRET")
+WEB_API_PORT: int = int(os.environ.get("WEB_API_PORT", "8080"))
+
 POSTGRES_USER = os.getenv("POSTGRES_USER")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
 POSTGRES_DB = os.getenv("POSTGRES_DB")

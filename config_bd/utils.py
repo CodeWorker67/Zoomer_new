@@ -702,6 +702,19 @@ class AsyncSQL:
             await session.execute(stmt)
             await session.commit()
 
+    async def get_payment_by_transaction_id(self, transaction_id: str, user_id: int) -> Optional[str]:
+        """Статус Platega-платежа (SBP / card / crypto), только если transaction принадлежит user_id."""
+        async with self.session_factory() as session:
+            for model in (Payments, PaymentsCards, PaymentsPlategaCrypto):
+                stmt = select(model).where(
+                    model.transaction_id == transaction_id,
+                    model.user_id == user_id,
+                )
+                row = (await session.execute(stmt)).scalar_one_or_none()
+                if row is not None:
+                    return row.status
+        return None
+
     async def get_active_cryptobot_payments(self) -> List[PaymentsCryptobot]:
         """
         Возвращает все платежи Cryptobot со статусом 'active'.

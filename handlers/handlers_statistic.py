@@ -256,6 +256,77 @@ async def analytics_export(message: Message):
         monthly_data = {}
         daily_data_by_month = {}
 
+        async with AsyncSessionLocal() as paid_session:
+            paid_main = {
+                row[0]
+                for row in (
+                    await paid_session.execute(
+                        select(Payments.user_id)
+                        .distinct()
+                        .where(
+                            Payments.status == 'confirmed',
+                            Payments.amount != 1,
+                        )
+                    )
+                ).all()
+            }
+            paid_stars = {
+                row[0]
+                for row in (
+                    await paid_session.execute(
+                        select(PaymentsStars.user_id)
+                        .distinct()
+                        .where(PaymentsStars.status == 'confirmed')
+                    )
+                ).all()
+            }
+            paid_crypto = {
+                row[0]
+                for row in (
+                    await paid_session.execute(
+                        select(PaymentsCryptobot.user_id)
+                        .distinct()
+                        .where(
+                            PaymentsCryptobot.status == 'paid',
+                            PaymentsCryptobot.amount > 0.02,
+                        )
+                    )
+                ).all()
+            }
+            paid_cards = {
+                row[0]
+                for row in (
+                    await paid_session.execute(
+                        select(PaymentsCards.user_id)
+                        .distinct()
+                        .where(
+                            PaymentsCards.status == 'confirmed',
+                            PaymentsCards.amount != 1,
+                        )
+                    )
+                ).all()
+            }
+            paid_platega_crypto = {
+                row[0]
+                for row in (
+                    await paid_session.execute(
+                        select(PaymentsPlategaCrypto.user_id)
+                        .distinct()
+                        .where(
+                            PaymentsPlategaCrypto.status == 'confirmed',
+                            PaymentsPlategaCrypto.amount != 1,
+                        )
+                    )
+                ).all()
+            }
+            all_paid_users = (
+                paid_main
+                | paid_stars
+                | paid_crypto
+                | paid_cards
+                | paid_platega_crypto
+            )
+
         for year, month in months:
             start_date = datetime(year, month, 1, 0, 0, 0)
             last_day = calendar.monthrange(year, month)[1]
@@ -320,45 +391,13 @@ async def analytics_export(message: Message):
                     if user.is_connect:
                         daily_stats[create_day]['connect'] += 1
 
-                # --- Множество плативших ---
-                stmt_paid_main = select(Payments.user_id).distinct().where(
-                    Payments.status == 'confirmed',
-                    Payments.amount != 1
-                )
-                paid_main = {row[0] for row in (await session.execute(stmt_paid_main)).all()}
-
-                stmt_paid_stars = select(PaymentsStars.user_id).distinct().where(
-                    PaymentsStars.status == 'confirmed'
-                )
-                paid_stars = {row[0] for row in (await session.execute(stmt_paid_stars)).all()}
-
-                stmt_paid_crypto = select(PaymentsCryptobot.user_id).distinct().where(
-                    PaymentsCryptobot.status == 'paid',
-                    PaymentsCryptobot.amount > 0.02
-                )
-                paid_crypto = {row[0] for row in (await session.execute(stmt_paid_crypto)).all()}
-
-                stmt_paid_cards = select(PaymentsCards.user_id).distinct().where(
-                    PaymentsCards.status == 'confirmed',
-                    PaymentsCards.amount != 1
-                )
-                paid_cards = {row[0] for row in (await session.execute(stmt_paid_cards)).all()}
-
-                stmt_paid_platega_crypto = select(PaymentsPlategaCrypto.user_id).distinct().where(
-                    PaymentsPlategaCrypto.status == 'confirmed',
-                    PaymentsPlategaCrypto.amount != 1  # если нужно исключить тестовые платежи
-                )
-                paid_platega_crypto = {row[0] for row in (await session.execute(stmt_paid_platega_crypto)).all()}
-
-                all_paid_users = paid_main.union(paid_stars).union(paid_crypto).union(paid_cards).union(paid_platega_crypto)
-
+                new_users_by_id = {u.user_id: u for u in new_users}
                 for uid in set_new_total:
-                    if uid in all_paid_users:
-                        # найдём день регистрации
-                        for user in new_users:
-                            if user.user_id == uid:
-                                daily_stats[user.create_user.day]['paid'] += 1
-                                break
+                    if uid not in all_paid_users:
+                        continue
+                    u = new_users_by_id.get(uid)
+                    if u is not None:
+                        daily_stats[u.create_user.day]['paid'] += 1
 
                 # --- Платежи новых пользователей за этот месяц ---
                 new_payments_amounts = []
@@ -594,6 +633,8 @@ async def analytics_export(message: Message):
                     })
 
                 daily_data_by_month[month_key] = daily_cumulative
+
+            await asyncio.sleep(0)
 
         export_path = await asyncio.to_thread(
             _sync_build_analytics_excel, monthly_data, daily_data_by_month

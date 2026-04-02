@@ -46,8 +46,8 @@ async def export_database_to_excel(message: Message):
             # --- Лист USERS ---
             ws_users = wb.create_sheet(title="users")
             users_columns = [
-                'ID', 'User ID', 'Ref', 'Is_delete', 'Is_pay_null', 'Is_tarif',
-                'Create_user', 'Is_admin', 'has_discount', 'subscription_end_date',
+                'ID', 'User ID', 'Ref', 'Is_delete', 'in_panel', 'is_connect',
+                'Create_user', 'in_chanel', 'has_discount', 'subscription_end_date',
                 'white_subscription_end_date', 'last_notification_date',
                 'last_broadcast_status', 'last_broadcast_date', 'stamp', 'ttclid',
                 'subscribtion', 'white_subscription', 'email', 'password', 'activation_pass',
@@ -68,8 +68,8 @@ async def export_database_to_excel(message: Message):
             for row_num, user in enumerate(users_list, 2):
                 row_data = [
                     user.id, user.user_id, user.ref, user.is_delete,
-                    user.is_pay_null, user.is_tarif, user.create_user,
-                    user.is_admin, user.has_discount, user.subscription_end_date,
+                    user.in_panel, user.is_connect, user.create_user,
+                    user.in_chanel, user.reserve_field, user.subscription_end_date,
                     user.white_subscription_end_date, user.last_notification_date,
                     user.last_broadcast_status, user.last_broadcast_date,
                     user.stamp, user.ttclid,

@@ -101,20 +101,20 @@ async def process_confirmed_payment(payload):
 
             # Реферальная система
             try:
-                user_data = await sql.SELECT_ID(user_id)
+                user_data = await sql.get_user(user_id)
                 if user_data and len(user_data) > 4:
-                    ref_has_discount = user_data[8]
+                    ref_reserve_field = user_data[8]
                     ref_id_str = user_data[2]
 
-                    if not ref_has_discount and ref_id_str:
+                    if not ref_reserve_field and ref_id_str:
                         try:
                             ref_id = int(ref_id_str)
-                            ref_data = await sql.SELECT_ID(ref_id)
+                            ref_data = await sql.get_user(ref_id)
 
                             if ref_data and len(ref_data) > 4:
-                                ref_is_pay_null = ref_data[4]
+                                ref_in_panel = ref_data[4]
 
-                                if ref_is_pay_null:
+                                if ref_in_panel:
                                     logger.info(f"🎁 Начисляем 7 дней рефереру {ref_id} за приглашение")
 
                                     # await x3.test_connect()
@@ -152,11 +152,11 @@ async def process_confirmed_payment(payload):
                 logger.error(f"❌ Ошибка при проверке реферальной системы: {e}")
 
             # Обновляем статус оплаты в БД users
-            if await sql.SELECT_ID(user_id) is not None:
-                await sql.UPDATE_PAYNULL(user_id)
+            if await sql.get_user(user_id) is not None:
+                await sql.update_in_panel(user_id)
             else:
-                await sql.INSERT(user_id, True)
-            await sql.UPDATE_DISCOUNT(user_id)
+                await sql.add_user(user_id, True)
+            await sql.update_reserve_field(user_id)
 
             # Отправляем уведомление пользователю
             try:

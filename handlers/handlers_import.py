@@ -105,7 +105,7 @@ async def import_select_app(callback: CallbackQuery):
     (F.data.endswith('_happ') | F.data.endswith('_v2'))
 )
 async def import_select_sub(callback: CallbackQuery):
-    user_data = await sql.SELECT_ID(callback.from_user.id)
+    user_data = await sql.get_user(callback.from_user.id)
     has_casual = has_white = False
     if user_data and user_data[9]:
         has_casual = True

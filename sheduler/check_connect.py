@@ -5,7 +5,7 @@ from logging_config import logger
 
 
 async def check_connect():
-    """Проверка подключившихся пользователей к впн и обновление в базе Is_pay_null"""
+    """Проверка подключившихся пользователей к VPN и обновление is_connect в БД."""
 
     await x3.test_connect()
     lst_active = await x3.activ_list()
@@ -13,11 +13,11 @@ async def check_connect():
 
     cnt = 0
     for user_id in lst_active:
-        user_data = await sql.SELECT_ID(user_id)
+        user_data = await sql.get_user(user_id)
         if user_data is not None:
             if not user_data[5]:
                 try:
-                    await sql.UPDATE_TARIFF(user_id, True)
+                    await sql.update_is_connect(user_id, True)
                     logger.info(f'{user_id} подключался к ВПН')
                     cnt += 1
                     await asyncio.sleep(0.05)

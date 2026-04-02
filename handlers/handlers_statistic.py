@@ -300,14 +300,14 @@ async def analytics_export(message: Message):
                         new_saraf.append(uid)
                         set_new_saraf.add(uid)
 
-                    if user.is_pay_null:
+                    if user.in_panel:
                         key_total.append(uid)
                         if is_zaliv:
                             key_zaliv.append(uid)
                         else:
                             key_saraf.append(uid)
 
-                    if user.is_tarif:
+                    if user.is_connect:
                         connect_total.append(uid)
                         if is_zaliv:
                             connect_zaliv.append(uid)
@@ -315,9 +315,9 @@ async def analytics_export(message: Message):
                             connect_saraf.append(uid)
 
                     daily_stats[create_day]['new'] += 1
-                    if user.is_pay_null:
+                    if user.in_panel:
                         daily_stats[create_day]['key'] += 1
-                    if user.is_tarif:
+                    if user.is_connect:
                         daily_stats[create_day]['connect'] += 1
 
                 # --- Множество плативших ---
@@ -562,14 +562,14 @@ async def analytics_export(message: Message):
                 }
 
                 # --- Поденные данные (кумулятивные) ---
-                stmt_before = select(Users.user_id, Users.is_pay_null, Users.is_tarif).where(
+                stmt_before = select(Users.user_id, Users.in_panel, Users.is_connect).where(
                     Users.create_user < start_date,
                     ~Users.id.in_(EXCLUDE_IDS)
                 )
                 users_before = (await session.execute(stmt_before)).all()
                 cum_users_before = len(users_before)
-                cum_key_before = sum(1 for u in users_before if u.is_pay_null)
-                cum_connect_before = sum(1 for u in users_before if u.is_tarif)
+                cum_key_before = sum(1 for u in users_before if u.in_panel)
+                cum_connect_before = sum(1 for u in users_before if u.is_connect)
 
                 await session.commit()
 

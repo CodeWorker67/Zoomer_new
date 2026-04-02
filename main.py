@@ -4,7 +4,7 @@ from aiogram.types import BotCommand
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from bot import bot
-from config_bd.models import create_tables
+from config_bd.models import create_tables, engine
 from payments import pay_stars, pay_cryptobot, pay_platega
 from sheduler.check_connect import check_connect
 from sheduler.check_cryptobot import check_cryptobot_payments
@@ -61,7 +61,8 @@ async def main() -> None:
         logger.error("Polling was cancelled. Cleaning up...")
     finally:
         await bot.session.close()
-        logger.info("Bot session closed.")
+        await engine.dispose()
+        logger.info("Bot session closed, DB pool disposed.")
 
 if __name__ == '__main__':
     try:

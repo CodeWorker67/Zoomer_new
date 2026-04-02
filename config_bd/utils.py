@@ -1,6 +1,7 @@
 import uuid
 
 from sqlalchemy import select, update, func, and_, or_
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from datetime import datetime, date, timedelta, timezone
 from typing import Any, Optional, List, Tuple, Dict
 
@@ -9,11 +10,18 @@ from config_bd.models import AsyncSessionLocal, Users, Payments, Gifts, Payments
 from logging_config import logger
 
 
+def _naive_utc(dt: datetime) -> datetime:
+    """asyncpg + TIMESTAMP WITHOUT TIME ZONE: только naive datetime; время в UTC."""
+    if dt.tzinfo is None:
+        return dt
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+
 class AsyncSQL:
     def __init__(self):
         self.session_factory = AsyncSessionLocal
 
-    async def SELECT_ID(self, user_id: int) -> Optional[Tuple]:
+    async def get_user(self, user_id: int) -> Optional[Tuple]:
         async with self.session_factory() as session:
             stmt = select(Users).where(Users.user_id == user_id)
             result = await session.execute(stmt)
@@ -21,8 +29,8 @@ class AsyncSQL:
             if user:
                 return (
                     user.id, user.user_id, user.ref, user.is_delete,
-                    user.is_pay_null, user.is_tarif, user.create_user,
-                    user.is_admin, user.has_discount, user.subscription_end_date,
+                    user.in_panel, user.is_connect, user.create_user,
+                    user.in_chanel, user.reserve_field, user.subscription_end_date,
                     user.white_subscription_end_date, user.last_notification_date,
                     user.last_broadcast_status, user.last_broadcast_date,
                     user.stamp, user.ttclid,
@@ -33,86 +41,98 @@ class AsyncSQL:
                 )
             return None
 
-    async def INSERT(self, user_id: int, Is_pay_null: bool, Is_tarif: bool = False,
-                     ref: str = '', is_delete: bool = False, Is_admin: bool = False,
-                     stamp=''):
+    async def add_user(
+        self,
+        user_id: int,
+        in_panel: bool,
+        is_connect: bool = False,
+        ref: str = '',
+        is_delete: bool = False,
+        in_chanel: bool = False,
+        stamp: str = '',
+    ) -> bool:
+        """True, если строка вставлена; False при конфликте user_id (гонки /start)."""
         async with self.session_factory() as session:
-            user = Users(
-                user_id=user_id,
-                ref=ref,
-                is_delete=is_delete,
-                is_pay_null=Is_pay_null,
-                is_tarif=Is_tarif,
-                is_admin=Is_admin,
-                stamp=stamp
+            stmt = (
+                pg_insert(Users)
+                .values(
+                    user_id=user_id,
+                    ref=ref,
+                    is_delete=is_delete,
+                    in_panel=in_panel,
+                    is_connect=is_connect,
+                    in_chanel=in_chanel,
+                    stamp=stamp,
+                    create_user=_naive_utc(datetime.now(timezone.utc)),
+                )
+                .on_conflict_do_nothing(index_elements=[Users.user_id])
             )
-            session.add(user)
             try:
+                result = await session.execute(stmt)
                 await session.commit()
+                return (result.rowcount or 0) > 0
             except Exception as e:
                 await session.rollback()
                 logger.error(f"Error inserting user {user_id}: {e}")
+                return False
 
-    async def UPDATE_PAYNULL(self, user_id: int):
+    async def update_in_panel(self, user_id: int):
         async with self.session_factory() as session:
-            stmt = update(Users).where(Users.user_id == user_id).values(is_pay_null=True)
+            stmt = update(Users).where(Users.user_id == user_id).values(in_panel=True)
             await session.execute(stmt)
             await session.commit()
 
-    async def UPDATE_ADMIN(self, user_id: int, booly: bool):
+    async def update_in_chanel(self, user_id: int, booly: bool):
         async with self.session_factory() as session:
-            stmt = update(Users).where(Users.user_id == user_id).values(is_admin=booly)
+            stmt = update(Users).where(Users.user_id == user_id).values(in_chanel=booly)
             await session.execute(stmt)
             await session.commit()
 
-    async def UPDATE_TARIFF(self, user_id: int, booly: bool):
+    async def update_is_connect(self, user_id: int, booly: bool):
         async with self.session_factory() as session:
-            stmt = update(Users).where(Users.user_id == user_id).values(is_tarif=booly)
+            stmt = update(Users).where(Users.user_id == user_id).values(is_connect=booly)
             await session.execute(stmt)
             await session.commit()
 
-    async def UPDATE_TTCLID(self, user_id: int, ttclid: str):
+    async def update_ttclid(self, user_id: int, ttclid: str):
         async with self.session_factory() as session:
             stmt = update(Users).where(Users.user_id == user_id).values(ttclid=ttclid)
             await session.execute(stmt)
             await session.commit()
 
-
-    async def UPDATE_DISCOUNT(self, user_id: int):
+    async def update_reserve_field(self, user_id: int):
         async with self.session_factory() as session:
-            stmt = update(Users).where(Users.user_id == user_id).values(has_discount=True)
+            stmt = update(Users).where(Users.user_id == user_id).values(reserve_field=True)
             await session.execute(stmt)
             await session.commit()
 
-
-    async def UPDATE_DELETE(self, user_id: int, booly: bool):
+    async def update_delete(self, user_id: int, booly: bool):
         async with self.session_factory() as session:
             stmt = update(Users).where(Users.user_id == user_id).values(is_delete=booly)
             await session.execute(stmt)
             await session.commit()
 
-    async def UPDATE_DELETE_ALL(self, booly: bool):
+    async def update_delete_all(self, booly: bool):
         async with self.session_factory() as session:
             stmt = update(Users).values(is_delete=booly)
             await session.execute(stmt)
             await session.commit()
 
-
-    async def SELECT_REF(self, user_id: int) -> Optional[Tuple]:
+    async def select_ref_if_in_panel(self, user_id: int) -> Optional[Tuple]:
         async with self.session_factory() as session:
-            stmt = select(Users).where(Users.user_id == user_id, Users.is_pay_null == True)
+            stmt = select(Users).where(Users.user_id == user_id, Users.in_panel == True)
             result = await session.execute(stmt)
             user = result.scalar_one_or_none()
             if user:
                 return (user.id, user.user_id, user.ref, user.is_delete,
-                        user.is_pay_null, user.is_tarif, user.create_user,
-                        user.is_admin, user.has_discount, user.subscription_end_date,
+                        user.in_panel, user.is_connect, user.create_user,
+                        user.in_chanel, user.reserve_field, user.subscription_end_date,
                         user.white_subscription_end_date, user.last_notification_date,
                         user.last_broadcast_status, user.last_broadcast_date,
                         user.stamp, user.ttclid)
             return None
 
-    async def SELECT_COUNT_REF(self, user_id: int) -> int:
+    async def select_ref_count(self, user_id: int) -> int:
         async with self.session_factory() as session:
             stmt = select(func.count(Users.user_id)).where(Users.ref == str(user_id))
             result = await session.execute(stmt)
@@ -120,13 +140,17 @@ class AsyncSQL:
 
     async def update_subscription_end_date(self, user_id: int, end_date: datetime):
         async with self.session_factory() as session:
-            stmt = update(Users).where(Users.user_id == user_id).values(subscription_end_date=end_date)
+            stmt = update(Users).where(Users.user_id == user_id).values(
+                subscription_end_date=_naive_utc(end_date)
+            )
             await session.execute(stmt)
             await session.commit()
 
     async def update_white_subscription_end_date(self, user_id: int, end_date: datetime):
         async with self.session_factory() as session:
-            stmt = update(Users).where(Users.user_id == user_id).values(white_subscription_end_date=end_date)
+            stmt = update(Users).where(Users.user_id == user_id).values(
+                white_subscription_end_date=_naive_utc(end_date)
+            )
             await session.execute(stmt)
             await session.commit()
 
@@ -182,15 +206,6 @@ class AsyncSQL:
                 return val.date()
             return val
 
-    async def update_broadcast_status(self, user_id: int, status: str):
-        async with self.session_factory() as session:
-            stmt = update(Users).where(Users.user_id == user_id).values(
-                last_broadcast_status=status,
-                last_broadcast_date=datetime.now()
-            )
-            await session.execute(stmt)
-            await session.commit()
-
     async def SELECT_ALL_USERS(self) -> List[int]:
         async with self.session_factory() as session:
             stmt = select(Users.user_id).where(
@@ -204,7 +219,7 @@ class AsyncSQL:
     ) -> List[Tuple[int, datetime, bool, Optional[str], Optional[str]]]:
         """
         Строки для sheduler.time_mes без N× get_user: user_id, subscription_end_date,
-        is_pay_null (оплачивал / клава тарифа), ttclid, field_str_1 (JSON состояния push).
+        in_panel (оплачивал / клава тарифа), ttclid, field_str_1 (JSON состояния push).
 
         Фильтр по времени (как _in_send_window в Python, moment <= now < moment + window):
         — Подписка активна: end попадает в одно из окон «за 7 / 3 / 1 день» или «за 1 час».
@@ -257,7 +272,7 @@ class AsyncSQL:
                 select(
                     Users.user_id,
                     Users.subscription_end_date,
-                    Users.is_pay_null,
+                    Users.in_panel,
                     Users.ttclid,
                     Users.field_str_1,
                 )
@@ -280,8 +295,8 @@ class AsyncSQL:
             current_time = datetime.now()
             today = date.today()
             stmt = select(Users.user_id).where(
-                Users.is_pay_null == True,
-                Users.is_tarif == False,
+                Users.in_panel == True,
+                Users.is_connect == False,
                 Users.is_delete == False,
                 Users.subscription_end_date > current_time,
                 (Users.last_broadcast_date.is_(None)) | (func.date(Users.last_broadcast_date) != today)
@@ -294,8 +309,8 @@ class AsyncSQL:
             current_time = datetime.now()
             today = datetime.now().date()
             stmt = select(Users.user_id).where(
-                Users.is_pay_null == True,
-                Users.is_tarif == False,
+                Users.in_panel == True,
+                Users.is_connect == False,
                 Users.is_delete == False,
                 (Users.subscription_end_date < current_time) |
                 (Users.subscription_end_date.is_(None)),
@@ -310,8 +325,8 @@ class AsyncSQL:
             current_time = datetime.now()
             today = datetime.now().date()
             stmt = select(Users.user_id).where(
-                Users.is_pay_null == True,
-                Users.is_tarif == True,
+                Users.in_panel == True,
+                Users.is_connect == True,
                 Users.is_delete == False,
                 (Users.subscription_end_date < current_time) |
                 (Users.subscription_end_date.is_(None)),
@@ -326,8 +341,8 @@ class AsyncSQL:
             current_time = datetime.now()
             today = datetime.now().date()
             stmt = select(Users.user_id).where(
-                Users.is_pay_null == True,
-                Users.is_tarif == True,
+                Users.in_panel == True,
+                Users.is_connect == True,
                 Users.is_delete == False,
                 Users.subscription_end_date > current_time,
                 (Users.last_broadcast_date.is_(None)) |
@@ -340,8 +355,8 @@ class AsyncSQL:
         async with self.session_factory() as session:
             today = datetime.now().date()
             stmt = select(Users.user_id).where(
-                Users.is_pay_null == False,
-                Users.is_tarif == False,
+                Users.in_panel == False,
+                Users.is_connect == False,
                 Users.is_delete == False,
                 (Users.last_broadcast_date.is_(None)) |
                 (func.date(Users.last_broadcast_date) != today)
@@ -351,7 +366,7 @@ class AsyncSQL:
 
     async def SELECT_CONNECTED_NEVER_PAID(self) -> List[int]:
         """
-        Возвращает список user_id, у которых is_tarif=True, is_delete=False,
+        Возвращает список user_id, у которых is_connect=True, is_delete=False,
         и нет ни одной успешной оплаты (статус 'confirmed' в Payments или PaymentsStars,
         или статус 'paid' в PaymentsCryptobot).
         """
@@ -370,7 +385,7 @@ class AsyncSQL:
                 .subquery()
             )
             stmt = select(Users.user_id).where(
-                Users.is_tarif == True,
+                Users.is_connect == True,
                 Users.is_delete == False,
                 (Users.last_broadcast_date.is_(None)) |
                 (func.date(Users.last_broadcast_date) != today),
@@ -381,14 +396,11 @@ class AsyncSQL:
 
     async def SELECT_SUBSCRIBED_NOT_IN_PANEL(self) -> List[int]:
         """
-        Возвращает список user_id, у которых is_tarif=True, is_delete=False,
-        и нет ни одной успешной оплаты (статус 'confirmed' в Payments или PaymentsStars,
-        или статус 'paid' в PaymentsCryptobot).
+        Возвращает список user_id с подпиской в панели без subscription_end_date (синхронизация с X3).
         """
         async with self.session_factory() as session:
-            # Подзапрос: все пользователи с успешными платежами
             stmt = select(Users.user_id).where(
-                Users.is_pay_null == True,
+                Users.in_panel == True,
                 Users.subscription_end_date == None,
                 Users.is_delete == False
             )
@@ -399,7 +411,7 @@ class AsyncSQL:
         async with self.session_factory() as session:
             # Подзапрос: все пользователи с успешными платежами
             stmt = select(Users.user_id).where(
-                Users.is_pay_null == True,
+                Users.in_panel == True,
                 Users.subscription_end_date != None,
                 Users.is_delete == False
             )
@@ -409,12 +421,12 @@ class AsyncSQL:
     async def SELECT_USERS_BY_PARAMETER(self, parameter: str, value: str) -> List[int]:
         """
         Возвращает список user_id, у которых значение указанного параметра равно value.
-        Допустимые параметры: 'Ref', 'Is_pay_null', 'stamp'.
+        Допустимые параметры: 'Ref', 'in_panel', 'Is_pay_null' (синоним in_panel), 'stamp'.
         """
-        # Маппинг имён параметров на атрибуты модели
         param_map = {
             'Ref': Users.ref,
-            'Is_pay_null': Users.is_pay_null,
+            'in_panel': Users.in_panel,
+            'Is_pay_null': Users.in_panel,
             'stamp': Users.stamp,
         }
         if parameter not in param_map:
@@ -423,8 +435,7 @@ class AsyncSQL:
 
         attr = param_map[parameter]
 
-        # Преобразование значения для булевых полей
-        if parameter == 'Is_pay_null':
+        if parameter in ('in_panel', 'Is_pay_null'):
             try:
                 val = bool(int(value))
             except ValueError:
@@ -464,12 +475,11 @@ class AsyncSQL:
         with_tarif_not_blocked = 0
 
         for user_id in users:
-            user_data = await self.SELECT_ID(user_id)
+            user_data = await self.get_user(user_id)
             if user_data:
-                # subscription_end_date — индекс 9, Is_tarif — индекс 5
                 if user_data[9] is not None:
                     with_sub += 1
-                if user_data[5]:  # Is_tarif
+                if user_data[5]:  # is_connect
                     with_tarif += 1
                 if user_data[5] and not user_data[3]:
                     with_tarif_not_blocked +=1
@@ -503,8 +513,8 @@ class AsyncSQL:
             'all_users'
         ]
 
-    async def DELETE(self, user_id: int) -> bool:
-        """Полностью удаляет пользователя из БД по User_id."""
+    async def delete_from_db(self, user_id: int) -> bool:
+        """Полностью удаляет пользователя из БД по user_id."""
         async with self.session_factory() as session:
             stmt = select(Users).where(Users.user_id == user_id)
             result = await session.execute(stmt)
@@ -600,7 +610,7 @@ class AsyncSQL:
         async with self.session_factory() as session:
             stmt = update(Users).where(Users.user_id == user_id).values(
                 last_broadcast_status=status,
-                last_broadcast_date=datetime.now()  # сохраняем полную дату и время
+                last_broadcast_date=_naive_utc(datetime.now(timezone.utc)),
             )
             try:
                 await session.execute(stmt)
@@ -936,10 +946,10 @@ class AsyncSQL:
                 logger.info(f"✅ Добавлена запись в white_counter для пользователя {user_id}")
 
     async def get_users_with_payment(self) -> List[int]:
-        """Возвращает список user_id пользователей с has_discount=True и is_delete=False."""
+        """Возвращает список user_id пользователей с reserve_field=True."""
         async with self.session_factory() as session:
             stmt = select(Users.user_id).where(
-                Users.has_discount == True
+                Users.reserve_field == True
             )
             result = await session.execute(stmt)
             return [row[0] for row in result.all()]

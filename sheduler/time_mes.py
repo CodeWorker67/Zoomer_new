@@ -118,7 +118,7 @@ async def send_message_cron(bot: Bot):
     ids_week: List[int] = []
     ids_second_chance: List[int] = []
 
-    for user_id, end_raw, is_pay_null, ttclid, field_str_1_raw in candidate_rows:
+    for user_id, end_raw, in_panel, ttclid, field_str_1_raw in candidate_rows:
         try:
             end = _normalize_end_utc(end_raw)
             if end is None:
@@ -127,7 +127,7 @@ async def send_message_cron(bot: Bot):
             end_key = _end_key(end)
             sent = _load_state(field_str_1_raw, end_key)
 
-            if is_pay_null:
+            if in_panel:
                 keyboard = keyboard_tariff()
             else:
                 keyboard = keyboard_tariff_trial()
@@ -221,7 +221,7 @@ async def send_message_cron(bot: Bot):
                     utc_today = now.date()
                     ttclid_value = f"second_chance_{utc_today.strftime('%d%m%y')}"
                     try:
-                        await sql.UPDATE_TTCLID(user_id, ttclid_value)
+                        await sql.update_ttclid(user_id, ttclid_value)
                         logger.info(f"✅ ttclid для {user_id} установлен: {ttclid_value}")
                     except Exception as e:
                         logger.error(f"Ошибка обновления ttclid для {user_id}: {e}")

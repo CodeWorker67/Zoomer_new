@@ -46,7 +46,7 @@ async def user_info(message: Message):
         user_id = int(args[1].strip())
 
         # Проверяем, существует ли пользователь в БД
-        user_data = await sql.SELECT_ID(user_id)
+        user_data = await sql.get_user(user_id)
 
         if not user_data:
             await message.answer(f"❌ Пользователь с ID {user_id} не найден в базе данных.")
@@ -117,7 +117,7 @@ async def set_subscription_date(message: Message):
             return
 
         # Проверяем наличие пользователя в БД
-        user_data = await sql.SELECT_ID(user_id)
+        user_data = await sql.get_user(user_id)
         if not user_data:
             await message.answer("⚠️ Пользователь не найден в БД.")
             return
@@ -182,7 +182,7 @@ async def delete_user_command(message: Message):
         user_id_to_delete = int(args[1].strip())
 
         # Проверяем, существует ли пользователь в БД
-        user_data = await sql.SELECT_ID(user_id_to_delete)
+        user_data = await sql.get_user(user_id_to_delete)
 
         if not user_data:
             await message.answer(f"❌ Пользователь с ID {user_id_to_delete} не найден в базе данных.")
@@ -192,12 +192,12 @@ async def delete_user_command(message: Message):
         user_info = {
             "user_id": user_data[1],  # User_id
             "ref": user_data[2],  # Ref
-            "is_pay_null": user_data[4],  # Is_pay_null
-            "is_admin": user_data[7] if len(user_data) > 7 else False  # Is_admin
+            "in_panel": user_data[4],
+            "in_chanel": user_data[7] if len(user_data) > 7 else False,
         }
 
         # УДАЛЯЕМ ПОЛЬЗОВАТЕЛЯ ИЗ БД
-        deletion_success = await sql.DELETE(user_id_to_delete)
+        deletion_success = await sql.delete_from_db(user_id_to_delete)
 
         if deletion_success:
             # Логируем действие
@@ -209,8 +209,8 @@ async def delete_user_command(message: Message):
                 f"📋 Информация об удалённом пользователе:\n"
                 f"├ ID: {user_info['user_id']}\n"
                 f"├ Реферер: {user_info['ref'] if user_info['ref'] else 'нет'}\n"
-                f"├ Оплачивал: {'✅ да' if user_info['is_pay_null'] else '❌ нет'}\n"
-                f"└ Администратор: {'✅ да' if user_info['is_admin'] else '❌ нет'}\n\n"
+                f"├ Брал ключ: {'✅ да' if user_info['in_panel'] else '❌ нет'}\n"
+                f"└ В канале: {'✅ да' if user_info['in_chanel'] else '❌ нет'}\n\n"
                 f"⚠️ Пользователь удалён только из базы данных бота.\n"
                 f"   Подписка в панели управления (X3) остаётся активной.\n"
                 f"   Чтобы удалить полностью, используйте команду /gift на 0 дней."
@@ -253,7 +253,7 @@ async def check_online(message: Message):
     count_pay = 0
     count_trial = 0
     for tg_id in active_telegram_ids:
-        user_data = await sql.SELECT_ID(tg_id)
+        user_data = await sql.get_user(tg_id)
         if user_data:
             if user_data[8]:
                 count_pay += 1
@@ -377,7 +377,7 @@ async def get_second_command(message: Message):
 
 @router.message(Command(commands=['check_users']))
 async def check_users_command(message: Message):
-    """Проверка соответствия дат окончания подписки у оплаченных пользователей (has_discount=True)"""
+    """Проверка соответствия дат окончания подписки у оплаченных пользователей (reserve_field=True)"""
     if message.from_user.id not in ADMIN_IDS:
         return
 
@@ -530,7 +530,7 @@ async def shortuuid_export_command(message: Message):
                 skipped_no_telegram += 1
                 continue
 
-            if not await sql.SELECT_ID(tg_id):
+            if not await sql.get_user(tg_id):
                 not_in_db += 1
                 continue
 
@@ -575,10 +575,10 @@ async def shortuuid_export_command(message: Message):
 
 @router.message(Command(commands=['update_delete']))
 async def check_users_command(message: Message):
-    """Проверка соответствия дат окончания подписки у оплаченных пользователей (has_discount=True)"""
+    """Проверка соответствия дат окончания подписки у оплаченных пользователей (reserve_field=True)"""
     if message.from_user.id not in ADMIN_IDS:
         return
-    await sql.UPDATE_DELETE_ALL(False)
+    await sql.update_delete_all(False)
     await message.answer('Все юзеры разблокированы')
 
 
@@ -600,7 +600,7 @@ async def send_push_command(message: Message):
     for user in all_users:
         if user.is_delete:
             continue
-        if not user.is_pay_null:
+        if not user.in_panel:
             continue
         if not user.subscription_end_date or user.subscription_end_date < now:
             continue

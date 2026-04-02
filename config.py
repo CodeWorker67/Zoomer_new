@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 import os
 from typing import Set, Optional
+from urllib.parse import quote_plus
 
 # Загрузка переменных окружения из .env файла
 load_dotenv()
@@ -16,3 +17,29 @@ PANEL_URL: Optional[str] = os.environ.get("PANEL_URL")
 PANEL_API_TOKEN: Optional[str] = os.environ.get("PANEL_API_TOKEN")
 SHORT_UUID_SECRET: Optional[str] = os.environ.get("SHORT_UUID_SECRET")
 BOT_URL: str = os.environ.get("BOT_URL") or "https://t.me/zoomerskyvpn_bot"
+
+POSTGRES_USER = os.getenv("POSTGRES_USER")
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
+POSTGRES_DB = os.getenv("POSTGRES_DB")
+POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
+POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
+# Пул на процесс: бот и отдельный API — отдельные процессы, у каждого свой пул.
+POSTGRES_POOL_SIZE = int(os.getenv("POSTGRES_POOL_SIZE", "10"))
+POSTGRES_MAX_OVERFLOW = int(os.getenv("POSTGRES_MAX_OVERFLOW", "20"))
+POSTGRES_POOL_RECYCLE = int(os.getenv("POSTGRES_POOL_RECYCLE", "1800"))
+
+
+def build_database_url() -> str:
+    if not POSTGRES_USER or not POSTGRES_PASSWORD or not POSTGRES_DB:
+        raise RuntimeError(
+            "Укажите POSTGRES_USER, POSTGRES_PASSWORD и POSTGRES_DB в окружении (.env)."
+        )
+    user = quote_plus(POSTGRES_USER)
+    password = quote_plus(POSTGRES_PASSWORD)
+    return (
+        f"postgresql+asyncpg://{user}:{password}"
+        f"@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
+    )
+
+
+DATABASE_URL = build_database_url()

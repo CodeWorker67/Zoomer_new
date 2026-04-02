@@ -32,7 +32,7 @@ async def check_online_daily():
         users_pay = 0
         users_trial = 0
         for tg_id in active_telegram_ids:
-            user_data = await sql.SELECT_ID(tg_id)
+            user_data = await sql.get_user(tg_id)
             if user_data:
                 if user_data[8]:
                     users_pay += 1

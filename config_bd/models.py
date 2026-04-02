@@ -3,8 +3,21 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 from sqlalchemy.orm import DeclarativeBase
 from datetime import datetime
 
-DB_URL = "sqlite+aiosqlite:///sqlite3.db"  # или путь к вашей БД
-engine = create_async_engine(DB_URL, echo=False)
+from config import (
+    DATABASE_URL,
+    POSTGRES_MAX_OVERFLOW,
+    POSTGRES_POOL_RECYCLE,
+    POSTGRES_POOL_SIZE,
+)
+
+engine = create_async_engine(
+    DATABASE_URL,
+    echo=False,
+    pool_pre_ping=True,
+    pool_size=POSTGRES_POOL_SIZE,
+    max_overflow=POSTGRES_MAX_OVERFLOW,
+    pool_recycle=POSTGRES_POOL_RECYCLE,
+)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
@@ -14,33 +27,33 @@ class Base(DeclarativeBase, AsyncAttrs):
 
 class Users(Base):
     __tablename__ = 'users'
-    id = Column('Id', Integer, primary_key=True)
-    user_id = Column('User_id', BigInteger, unique=True, nullable=False)
-    ref = Column('Ref', String(100), nullable=True)
-    is_delete = Column('Is_delete', Boolean, default=False)
-    is_pay_null = Column('Is_pay_null', Boolean, default=False)
-    is_tarif = Column('Is_tarif', Boolean, default=False)
-    create_user = Column('Create_user', DateTime, default=datetime.now)
-    is_admin = Column('Is_admin', Boolean, default=False)
-    has_discount = Column('has_discount', Boolean, default=False)
-    subscription_end_date = Column('subscription_end_date', DateTime, nullable=True)
-    white_subscription_end_date = Column('white_subscription_end_date', DateTime, nullable=True)
-    last_notification_date = Column('last_notification_date', Date, nullable=True)
-    last_broadcast_status = Column('last_broadcast_status', String(100), nullable=True)
-    last_broadcast_date = Column('last_broadcast_date', DateTime, nullable=True)
-    stamp = Column('stamp', String(100), nullable=False)
-    ttclid = Column('ttclid', String(100), nullable=True)
-    subscribtion = Column('subscribtion', String(255), nullable=True)
-    white_subscription = Column('white_subscription', String(255), nullable=True)
-    email = Column('email', String(255), nullable=True)
-    password = Column('password', String(255), nullable=True)
-    activation_pass = Column('activation_pass', String(255), nullable=True)
-    field_str_1 = Column('field_str_1', String(255), nullable=True)
-    field_str_2 = Column('field_str_2', String(255), nullable=True)
-    field_str_3 = Column('field_str_3', String(255), nullable=True)
-    field_bool_1 = Column('field_bool_1', Boolean, default=False)
-    field_bool_2 = Column('field_bool_2', Boolean, default=False)
-    field_bool_3 = Column('field_bool_3', Boolean, default=False)
+    id = Column(Integer, primary_key=True)
+    user_id = Column(BigInteger, unique=True, nullable=False)
+    ref = Column(String(100), nullable=True)
+    is_delete = Column(Boolean, default=False)
+    in_panel = Column(Boolean, default=False)
+    is_connect = Column(Boolean, default=False)
+    create_user = Column(DateTime, default=datetime.now)
+    in_chanel = Column(Boolean, default=False)
+    reserve_field = Column(Boolean, default=False)
+    subscription_end_date = Column(DateTime, nullable=True)
+    white_subscription_end_date = Column(DateTime, nullable=True)
+    last_notification_date = Column(Date, nullable=True)
+    last_broadcast_status = Column(String(100), nullable=True)
+    last_broadcast_date = Column(DateTime, nullable=True)
+    stamp = Column(String(100), nullable=False)
+    ttclid = Column(String(100), nullable=True)
+    subscribtion = Column(String(255), nullable=True)
+    white_subscription = Column(String(255), nullable=True)
+    email = Column(String(255), nullable=True)
+    password = Column(String(255), nullable=True)
+    activation_pass = Column(String(255), nullable=True)
+    field_str_1 = Column(String(255), nullable=True)
+    field_str_2 = Column(String(255), nullable=True)
+    field_str_3 = Column(String(255), nullable=True)
+    field_bool_1 = Column(Boolean, default=False)
+    field_bool_2 = Column(Boolean, default=False)
+    field_bool_3 = Column(Boolean, default=False)
 
 
 class Gifts(Base):

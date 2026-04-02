@@ -8,11 +8,11 @@ from logging_config import logger
 
 async def send_push_cron(debug: bool = False):
     """
-    Отправляет push-уведомления пользователям с Is_tarif = False
-    в определенные интервалы после создания.
+    Push по этапам после регистрации: без подписки (in_panel=False),
+    затем с подпиской, но без VPN (is_connect=False).
     """
     try:
-        # Получаем всех пользователей с Is_tarif = False
+        # Все пользователи; фильтр по полям — в цикле
         all_users = await sql.SELECT_ALL_USERS()
 
         if not all_users:
@@ -29,7 +29,7 @@ async def send_push_cron(debug: bool = False):
         for user_id in all_users:
             try:
                 # Получаем данные пользователя
-                user_data = await sql.SELECT_ID(user_id)
+                user_data = await sql.get_user(user_id)
                 if not user_data:
                     continue
 
@@ -40,7 +40,7 @@ async def send_push_cron(debug: bool = False):
                 time_diff = now - create_time
                 minutes_diff = time_diff.total_seconds() / 60
                 video_flag = False
-                if not user_data[4]: #Проверяем Is_pay_null, если нет подписки то отсылаем
+                if not user_data[4]:  # in_panel: нет подписки в панели
                     message_text = None
                     if 30 <= minutes_diff <= 60:
                         message_text = lexicon['push_not_subscribed_30m']
@@ -72,7 +72,7 @@ async def send_push_cron(debug: bool = False):
                             failed_count_not_sub += 1
                             logger.error(f"Не удалось отправить сообщение пользователю {user_id}: {e}")
 
-                elif not user_data[5]: #Проверяем Is_tarif, если нет подключения то отсылаем
+                elif not user_data[5]:  # is_connect: VPN ещё не подключён
                     message_text = None
                     if 30 <= minutes_diff <= 60:
                         message_text = lexicon['push_not_connected_30m']

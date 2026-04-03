@@ -322,17 +322,34 @@ async def export_database_to_excel(message: Message):
             return path
 
         export_path = await asyncio.to_thread(_sync_build_export)
-        users_count = len(snapshot["users"])
-        gifts_count = len(snapshot["gifts"])
-        payments_count = len(snapshot["payments"])
-        payments_cards_count = len(snapshot["payments_cards"])
-        payments_stars_count = len(snapshot["payments_stars"])
-        payments_cryptobot_count = len(snapshot["payments_cryptobot"])
+        users_list = snapshot["users"]
+        gifts_list = snapshot["gifts"]
+        payments_list = snapshot["payments"]
+        payments_cards_list = snapshot["payments_cards"]
+        payments_stars_list = snapshot["payments_stars"]
+        payments_platega_crypto_list = snapshot["payments_platega_crypto"]
+        payments_cryptobot_list = snapshot["payments_cryptobot"]
+
+        users_count = len(users_list)
+        gifts_count = len(gifts_list)
+        payments_count = len(payments_list)
+        payments_cards_count = len(payments_cards_list)
+        payments_stars_count = len(payments_stars_list)
+        payments_cryptobot_count = len(payments_cryptobot_list)
         white_counter_count = len(snapshot["white_counter"])
-        payments_platega_crypto_count = len(snapshot["payments_platega_crypto"])
+        payments_platega_crypto_count = len(payments_platega_crypto_list)
         white_subscription_count = sum(
-            1 for u in snapshot["users"] if u.white_subscription_end_date is not None
+            1 for u in users_list if u.white_subscription_end_date is not None
         )
+
+        successful_payments_count = sum(1 for p in payments_list if p.status == "confirmed")
+        successful_cards_count = sum(1 for p in payments_cards_list if p.status == "confirmed")
+        successful_platega_crypto_count = sum(
+            1 for p in payments_platega_crypto_list if p.status == "confirmed"
+        )
+        successful_stars_count = sum(1 for p in payments_stars_list if p.status == "confirmed")
+        successful_cryptobot_count = sum(1 for p in payments_cryptobot_list if p.status == "paid")
+
         try:
             now_s = datetime.now().strftime('%d.%m.%Y %H:%M')
             caption = (
@@ -341,11 +358,11 @@ async def export_database_to_excel(message: Message):
                 "📊 Статистика:\n"
                 f"├ 👥 Пользователей: {users_count}\n"
                 f"├ 🎁 Подарков: {gifts_count}\n"
-                f"├ ⚡ Платежей Platega СБП: {payments_count}\n"
-                f"├ 💳 Платежей Platega Карта: {payments_cards_count}\n"
-                f"├ ⭐ Платежей Stars: {payments_stars_count}\n"
-                f"├ 💰 Платежей Platega Крипто: {payments_platega_crypto_count}\n"
-                f"├ 💎 Платежей Криптоботом: {payments_cryptobot_count}\n"
+                f"├ ⚡ Платежей Platega СБП: {successful_payments_count}/{payments_count}\n"
+                f"├ 💳 Платежей Platega Карта: {successful_cards_count}/{payments_cards_count}\n"
+                f"├ ⭐ Платежей Stars: {successful_stars_count}/{payments_stars_count}\n"
+                f"├ 💰 Платежей Platega Крипто: {successful_platega_crypto_count}/{payments_platega_crypto_count}\n"
+                f"├ 💎 Платежей Криптоботом: {successful_cryptobot_count}/{payments_cryptobot_count}\n"
                 f"├ ⚪ White-подписок: {white_subscription_count}\n"
                 f"└ 👁 White-кликов: {white_counter_count}"
             )

@@ -911,6 +911,108 @@ class AsyncSQL:
             result = await session.execute(select(PaymentsCryptobot))
             return result.scalars().all()
 
+    async def get_regular_subscription_payment_events(self) -> List[Tuple[int, datetime, int]]:
+        """
+        Успешные оплаты обычной подписки (не «Включи мобильный интернет» / white), не подарок.
+        Исключаются тестовые суммы 1 (админы). Возвращает (user_id, time_created UTC naive, duration_days).
+        """
+        rows: List[Tuple[int, datetime, int]] = []
+
+        def _parse_payload_map(payload: Optional[str]) -> dict[str, str]:
+            if not payload:
+                return {}
+            out: dict[str, str] = {}
+            for part in payload.split(','):
+                if ':' not in part:
+                    continue
+                k, _, v = part.partition(':')
+                out[k.strip()] = v.strip()
+            return out
+
+        def _include(payload: Optional[str], is_gift: bool, amount: Any) -> Optional[int]:
+            if is_gift:
+                return None
+            try:
+                if float(amount) == 1.0:
+                    return None
+            except (TypeError, ValueError):
+                return None
+            m = _parse_payload_map(payload)
+            if m.get('white', 'False').lower() == 'true':
+                return None
+            if m.get('gift', 'False').lower() == 'true':
+                return None
+            try:
+                d = int(m.get('duration', '0'))
+            except ValueError:
+                return None
+            if d <= 0:
+                return None
+            return d
+
+        async with self.session_factory() as session:
+            q1 = select(
+                Payments.user_id, Payments.time_created, Payments.amount, Payments.payload, Payments.is_gift
+            ).where(Payments.status == 'confirmed', Payments.is_gift == False)
+            for uid, tc, amt, pl, ig in (await session.execute(q1)).all():
+                d = _include(pl, ig, amt)
+                if d is not None:
+                    rows.append((uid, tc, d))
+
+            q2 = select(
+                PaymentsCards.user_id,
+                PaymentsCards.time_created,
+                PaymentsCards.amount,
+                PaymentsCards.payload,
+                PaymentsCards.is_gift,
+            ).where(PaymentsCards.status == 'confirmed', PaymentsCards.is_gift == False)
+            for uid, tc, amt, pl, ig in (await session.execute(q2)).all():
+                d = _include(pl, ig, amt)
+                if d is not None:
+                    rows.append((uid, tc, d))
+
+            q3 = select(
+                PaymentsPlategaCrypto.user_id,
+                PaymentsPlategaCrypto.time_created,
+                PaymentsPlategaCrypto.amount,
+                PaymentsPlategaCrypto.payload,
+                PaymentsPlategaCrypto.is_gift,
+            ).where(
+                PaymentsPlategaCrypto.status == 'confirmed',
+                PaymentsPlategaCrypto.is_gift == False,
+            )
+            for uid, tc, amt, pl, ig in (await session.execute(q3)).all():
+                d = _include(pl, ig, amt)
+                if d is not None:
+                    rows.append((uid, tc, d))
+
+            q4 = select(
+                PaymentsStars.user_id,
+                PaymentsStars.time_created,
+                PaymentsStars.amount,
+                PaymentsStars.payload,
+                PaymentsStars.is_gift,
+            ).where(PaymentsStars.status == 'confirmed', PaymentsStars.is_gift == False)
+            for uid, tc, amt, pl, ig in (await session.execute(q4)).all():
+                d = _include(pl, ig, amt)
+                if d is not None:
+                    rows.append((uid, tc, d))
+
+            q5 = select(
+                PaymentsCryptobot.user_id,
+                PaymentsCryptobot.time_created,
+                PaymentsCryptobot.amount,
+                PaymentsCryptobot.payload,
+                PaymentsCryptobot.is_gift,
+            ).where(PaymentsCryptobot.status == 'paid', PaymentsCryptobot.is_gift == False)
+            for uid, tc, amt, pl, ig in (await session.execute(q5)).all():
+                d = _include(pl, ig, amt)
+                if d is not None:
+                    rows.append((uid, tc, d))
+
+        rows.sort(key=lambda x: (x[1], x[0]))
+        return rows
+
     async def get_all_gifts(self) -> List[Gifts]:
         """Возвращает список всех подарков."""
         async with self.session_factory() as session:

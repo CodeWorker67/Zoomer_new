@@ -1,7 +1,10 @@
 import asyncio
 import os
 import tempfile
-from datetime import datetime
+from collections import defaultdict
+from datetime import date, datetime, timedelta, timezone
+from typing import List, Tuple
+from zoneinfo import ZoneInfo
 
 import openpyxl
 from aiogram import Router
@@ -383,6 +386,168 @@ async def export_database_to_excel(message: Message):
         logger.error(error_message)
         logger.exception("Детали ошибки:")
         await message.answer(error_message)
+
+
+MSK = ZoneInfo("Europe/Moscow")
+
+
+def _utc_naive(dt: datetime) -> datetime:
+    if dt.tzinfo is not None:
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
+
+def _msk_start_as_utc_naive(d: date) -> datetime:
+    aware = datetime(d.year, d.month, d.day, tzinfo=MSK)
+    return aware.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _payment_msk_date(utc_naive: datetime) -> date:
+    return utc_naive.replace(tzinfo=timezone.utc).astimezone(MSK).date()
+
+
+def _build_billing_xlsx(events: List[Tuple[int, datetime, int]]) -> str:
+    """Строит Excel по дням (календарь МСК). events: (user_id, time_created, duration_days)."""
+    paid_on_day: dict[date, set[int]] = defaultdict(set)
+    first_ts: dict[int, datetime] = {}
+
+    for uid, t_raw, _dur in events:
+        t = _utc_naive(t_raw)
+        if uid not in first_ts or t < first_ts[uid]:
+            first_ts[uid] = t
+        paid_on_day[_payment_msk_date(t)].add(uid)
+
+    first_msk_day: dict[int, date] = {
+        uid: _payment_msk_date(ts) for uid, ts in first_ts.items()
+    }
+
+    events_sorted = sorted(events, key=lambda x: (_utc_naive(x[1]), x[0]))
+    today_msk = datetime.now(MSK).date()
+    min_day = min(first_msk_day.values()) if first_msk_day else today_msk
+
+    header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    thin_border = Border(
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side(style="thin"),
+    )
+    headers = [
+        "Дата (МСК)",
+        "Пользователей с первой оплатой в этот день",
+        "Пользователей с оплатой в этот день (уже платили ранее)",
+        "Накопительно: пользователей с 2+ оплатами",
+        "Доля п.3 от п.7, %",
+        "Накопительно: платили, к концу дня подписка не продлена",
+        "Доля п.6 от п.7, %",
+        "Накопительно: хотя бы одна оплата",
+    ]
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "billing"
+
+    for col_num, title in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_num, value=title)
+        cell.alignment = header_alignment
+        cell.border = thin_border
+
+    ptr = 0
+    user_n: dict[int, int] = {}
+    user_end: dict[int, datetime] = {}
+    n_rows = 0
+    d = min_day
+    while d <= today_msk:
+        cutoff = _msk_start_as_utc_naive(d + timedelta(days=1))
+        while ptr < len(events_sorted):
+            uid, t_raw, dur = events_sorted[ptr]
+            tn = _utc_naive(t_raw)
+            if tn >= cutoff:
+                break
+            user_n[uid] = user_n.get(uid, 0) + 1
+            prev = user_end.get(uid)
+            base = max(tn, prev) if prev is not None else tn
+            user_end[uid] = base + timedelta(days=dur)
+            ptr += 1
+
+        day_users = paid_on_day.get(d, set())
+        n_first = sum(1 for u in day_users if first_msk_day.get(u) == d)
+        n_repeat = sum(1 for u in day_users if first_msk_day.get(u) is not None and first_msk_day[u] < d)
+
+        total7 = len(user_n)
+        total3 = sum(1 for c in user_n.values() if c >= 2)
+        total5 = sum(1 for u in user_n if user_end.get(u) is not None and user_end[u] < cutoff)
+
+        pct34 = round(100.0 * total3 / total7, 2) if total7 else None
+        pct67 = round(100.0 * total5 / total7, 2) if total7 else None
+
+        row = [
+            d.isoformat(),
+            n_first,
+            n_repeat,
+            total3,
+            pct34,
+            total5,
+            pct67,
+            total7,
+        ]
+        for col_num, value in enumerate(row, 1):
+            cell = ws.cell(row=n_rows + 2, column=col_num, value=value)
+            cell.border = thin_border
+            if col_num == 1:
+                cell.alignment = Alignment(horizontal="center")
+        n_rows += 1
+        d += timedelta(days=1)
+
+    for col in ws.columns:
+        max_len = 12
+        col_letter = col[0].column_letter
+        for cell in col:
+            if cell.value is not None:
+                max_len = max(max_len, len(str(cell.value)))
+        ws.column_dimensions[col_letter].width = min(max_len + 2, 46)
+
+    ws.freeze_panes = "A2"
+    fd, path = tempfile.mkstemp(suffix=".xlsx")
+    os.close(fd)
+    wb.save(path)
+    return path
+
+
+@router.message(Command(commands=["billing"]))
+async def export_billing_excel(message: Message):
+    """Выгрузка метрик по оплатам обычной подписки по дням (Excel)."""
+    if message.from_user.id not in ADMIN_IDS:
+        await message.answer("❌ Эта команда доступна только администраторам.")
+        return
+
+    await message.answer("🔄 Собираю оплаты обычной подписки и формирую Excel…")
+    try:
+        events = await sql.get_regular_subscription_payment_events()
+        if not events:
+            await message.answer("Нет подходящих подтверждённых платежей (обычная подписка, не подарок, не mobile).")
+            return
+
+        path = await asyncio.to_thread(_build_billing_xlsx, events)
+        try:
+            fname = f"billing_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            await message.answer_document(
+                document=FSInputFile(path, filename=fname),
+                caption=(
+                    "📊 Оплаты обычной подписки (без «Включи мобильный интернет»), календарные дни по МСК.\n"
+                    "П.6: среди тех, кто хоть раз платил, к концу дня дата окончания подписки (по сумме длительностей "
+                    "платежей) раньше начала следующего дня по МСК — то есть доступ не продлён."
+                ),
+            )
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        logger.info(f"Администратор {message.from_user.id} выгрузил /billing")
+    except Exception as e:
+        logger.exception("Ошибка /billing")
+        await message.answer(f"❌ Ошибка при выгрузке: {e}")
 
 
 @router.message(Command("export_panel"))

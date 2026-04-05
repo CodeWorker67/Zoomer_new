@@ -434,15 +434,15 @@ def _build_billing_xlsx(events: List[Tuple[int, datetime, int]]) -> str:
     )
     headers = [
         "Дата (МСК)",
-        "Пользователей с первой оплатой в этот день",
-        "Пользователей с оплатой в этот день (уже платили ранее)",
-        "Накопительно: пользователей с 2+ оплатами",
-        "Доля п.3 от п.7, %",
-        "Накопительно: платили, к концу дня подписка не продлена",
-        "Доля п.6 от п.7, %",
-        "Накопительно: хотя бы одна оплата",
-        "Накопительно: ровно 1 оплата, подписка активна к концу дня",
-        "Доля п.9 от п.8, %",
+        "Первобилы сегодня",
+        "Рецидивисты сегодня",
+        "Всего рецидивистов",
+        "Всего рецидивистов, %",
+        "Ушедшие",
+        "Ушедшие, %",
+        "Всего первобилов",
+        "Всего первобилов, %",
+        "Всего оплативших",
     ]
 
     wb = openpyxl.Workbook()
@@ -476,30 +476,34 @@ def _build_billing_xlsx(events: List[Tuple[int, datetime, int]]) -> str:
         n_first = sum(1 for u in day_users if first_msk_day.get(u) == d)
         n_repeat = sum(1 for u in day_users if first_msk_day.get(u) is not None and first_msk_day[u] < d)
 
-        total7 = len(user_n)
-        total3 = sum(1 for c in user_n.values() if c >= 2)
-        total5 = sum(1 for u in user_n if user_end.get(u) is not None and user_end[u] < cutoff)
-        total9 = sum(
+        total_payers = len(user_n)
+        total_recurrent_active = sum(
+            1
+            for u, c in user_n.items()
+            if c >= 2 and user_end.get(u) is not None and user_end[u] >= cutoff
+        )
+        total_churned = sum(1 for u in user_n if user_end.get(u) is not None and user_end[u] < cutoff)
+        total_firstbill_active = sum(
             1
             for u, c in user_n.items()
             if c == 1 and user_end.get(u) is not None and user_end[u] >= cutoff
         )
 
-        pct34 = round(100.0 * total3 / total7, 2) if total7 else None
-        pct67 = round(100.0 * total5 / total7, 2) if total7 else None
-        pct910 = round(100.0 * total9 / total7, 2) if total7 else None
+        pct_recurrent = round(100.0 * total_recurrent_active / total_payers, 2) if total_payers else None
+        pct_churned = round(100.0 * total_churned / total_payers, 2) if total_payers else None
+        pct_firstbill = round(100.0 * total_firstbill_active / total_payers, 2) if total_payers else None
 
         row = [
             d.isoformat(),
             n_first,
             n_repeat,
-            total3,
-            pct34,
-            total5,
-            pct67,
-            total7,
-            total9,
-            pct910,
+            total_recurrent_active,
+            pct_recurrent,
+            total_churned,
+            pct_churned,
+            total_firstbill_active,
+            pct_firstbill,
+            total_payers,
         ]
         for col_num, value in enumerate(row, 1):
             cell = ws.cell(row=n_rows + 2, column=col_num, value=value)
@@ -509,13 +513,8 @@ def _build_billing_xlsx(events: List[Tuple[int, datetime, int]]) -> str:
         n_rows += 1
         d += timedelta(days=1)
 
-    for col in ws.columns:
-        max_len = 12
-        col_letter = col[0].column_letter
-        for cell in col:
-            if cell.value is not None:
-                max_len = max(max_len, len(str(cell.value)))
-        ws.column_dimensions[col_letter].width = min(max_len + 2, 46)
+    for idx in range(1, len(headers) + 1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(idx)].width = 18
 
     ws.freeze_panes = "A2"
     fd, path = tempfile.mkstemp(suffix=".xlsx")
@@ -546,10 +545,8 @@ async def export_billing_excel(message: Message):
             await message.answer_document(
                 document=FSInputFile(path, filename=fname),
                 caption=(
-                    "📊 Оплаты обычной подписки (без «Включи мобильный интернет»), статусы confirmed/paid, "
-                    "календарные дни по МСК. Длительность из payload или по сумме (старые платежи без payload).\n"
-                    "П.9–10: накопительно пользователи с единственной оплатой, у которых по модели длительностей "
-                    "подписка ещё не истекла к концу календарного дня (МСК); п.10 — доля от п.8."
+                    "Оплаты обычной подписки (без «Включи мобильный интернет»), статусы confirmed/paid, "
+                    "календарные дни по МСК. Длительность из payload или по сумме (старые платежи без payload)."
                 ),
             )
         finally:

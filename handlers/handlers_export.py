@@ -441,6 +441,8 @@ def _build_billing_xlsx(events: List[Tuple[int, datetime, int]]) -> str:
         "Накопительно: платили, к концу дня подписка не продлена",
         "Доля п.6 от п.7, %",
         "Накопительно: хотя бы одна оплата",
+        "Накопительно: ровно 1 оплата, подписка активна к концу дня",
+        "Доля п.9 от п.8, %",
     ]
 
     wb = openpyxl.Workbook()
@@ -477,9 +479,15 @@ def _build_billing_xlsx(events: List[Tuple[int, datetime, int]]) -> str:
         total7 = len(user_n)
         total3 = sum(1 for c in user_n.values() if c >= 2)
         total5 = sum(1 for u in user_n if user_end.get(u) is not None and user_end[u] < cutoff)
+        total9 = sum(
+            1
+            for u, c in user_n.items()
+            if c == 1 and user_end.get(u) is not None and user_end[u] >= cutoff
+        )
 
         pct34 = round(100.0 * total3 / total7, 2) if total7 else None
         pct67 = round(100.0 * total5 / total7, 2) if total7 else None
+        pct910 = round(100.0 * total9 / total7, 2) if total7 else None
 
         row = [
             d.isoformat(),
@@ -490,6 +498,8 @@ def _build_billing_xlsx(events: List[Tuple[int, datetime, int]]) -> str:
             total5,
             pct67,
             total7,
+            total9,
+            pct910,
         ]
         for col_num, value in enumerate(row, 1):
             cell = ws.cell(row=n_rows + 2, column=col_num, value=value)
@@ -537,7 +547,9 @@ async def export_billing_excel(message: Message):
                 document=FSInputFile(path, filename=fname),
                 caption=(
                     "📊 Оплаты обычной подписки (без «Включи мобильный интернет»), статусы confirmed/paid, "
-                    "календарные дни по МСК. Длительность из payload или по сумме (старые платежи без payload)."
+                    "календарные дни по МСК. Длительность из payload или по сумме (старые платежи без payload).\n"
+                    "П.9–10: накопительно пользователи с единственной оплатой, у которых по модели длительностей "
+                    "подписка ещё не истекла к концу календарного дня (МСК); п.10 — доля от п.8."
                 ),
             )
         finally:

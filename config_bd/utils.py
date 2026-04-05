@@ -7,10 +7,65 @@ from typing import Any, Optional, List, Tuple, Dict
 
 from config_bd.models import AsyncSessionLocal, Users, Payments, Gifts, PaymentsCryptobot, PaymentsStars, Online, \
     WhiteCounter, PaymentsCards, PaymentsPlategaCrypto
+from lexicon import dct_price
 from logging_config import logger
 
 # Размер батча для IN (...) в PostgreSQL (очень длинные списки режутся).
 _STAT_IN_CHUNK = 8000
+
+_BILLING_OK_STATUSES = ("confirmed", "paid")
+
+# Старые тарифы до полноценного payload (сумма → дни, только обычная подписка).
+_LEGACY_BILLING_AMOUNT_TO_DAYS: Dict[int, int] = {
+    99: 30,
+    269: 120,
+    499: 180,
+}
+
+
+def _billing_days_for_tariff_key(key: str) -> Optional[int]:
+    """Дни обычной подписки по ключу тарифа из dct_price (без white)."""
+    if "white" in key:
+        return None
+    if key == "7":
+        return 7
+    if key in ("30", "30old"):
+        return 30
+    if key == "90":
+        return 90
+    if key == "120":
+        return 120
+    if key == "180":
+        return 180
+    return None
+
+
+def _billing_duration_from_amount_fallback(amount: Any) -> Optional[int]:
+    """
+    Если в payload нет duration: актуальные суммы из dct_price (несколько тарифов на цену — max дней)
+    плюс устаревшие суммы из _LEGACY_BILLING_AMOUNT_TO_DAYS (99→30, 269→120, 499→180).
+    """
+    try:
+        target = int(round(float(amount)))
+    except (TypeError, ValueError):
+        return None
+    if target == 1:
+        return None
+    candidates: list[int] = []
+    for key, price in dct_price.items():
+        days = _billing_days_for_tariff_key(key)
+        if days is None:
+            continue
+        if int(price) != target:
+            continue
+        candidates.append(days)
+    from_tariffs = max(candidates) if candidates else None
+    legacy_days = _LEGACY_BILLING_AMOUNT_TO_DAYS.get(target)
+    if from_tariffs is not None and legacy_days is not None:
+        return max(from_tariffs, legacy_days)
+    if from_tariffs is not None:
+        return from_tariffs
+    return legacy_days
 
 
 def _naive_utc(dt: datetime) -> datetime:
@@ -914,6 +969,7 @@ class AsyncSQL:
     async def get_regular_subscription_payment_events(self) -> List[Tuple[int, datetime, int]]:
         """
         Успешные оплаты обычной подписки (не «Включи мобильный интернет» / white), не подарок.
+        Статус: confirmed или paid. Длительность из payload; если нет (старые записи) — по сумме из dct_price.
         Исключаются тестовые суммы 1 (админы). Возвращает (user_id, time_created UTC naive, duration_days).
         """
         rows: List[Tuple[int, datetime, int]] = []
@@ -933,27 +989,31 @@ class AsyncSQL:
             if is_gift:
                 return None
             try:
-                if float(amount) == 1.0:
+                amt_f = float(amount)
+                if amt_f == 1.0:
                     return None
             except (TypeError, ValueError):
                 return None
             m = _parse_payload_map(payload)
-            if m.get('white', 'False').lower() == 'true':
+            if m.get("white", "False").lower() == "true":
                 return None
-            if m.get('gift', 'False').lower() == 'true':
+            if m.get("gift", "False").lower() == "true":
                 return None
+            d: Optional[int] = None
             try:
-                d = int(m.get('duration', '0'))
+                di = int(m.get("duration", "0") or "0")
+                if di > 0:
+                    d = di
             except ValueError:
-                return None
-            if d <= 0:
-                return None
-            return d
+                pass
+            if d is not None:
+                return d
+            return _billing_duration_from_amount_fallback(amt_f)
 
         async with self.session_factory() as session:
             q1 = select(
                 Payments.user_id, Payments.time_created, Payments.amount, Payments.payload, Payments.is_gift
-            ).where(Payments.status == 'confirmed', Payments.is_gift == False)
+            ).where(Payments.status.in_(_BILLING_OK_STATUSES), Payments.is_gift == False)
             for uid, tc, amt, pl, ig in (await session.execute(q1)).all():
                 d = _include(pl, ig, amt)
                 if d is not None:
@@ -965,7 +1025,7 @@ class AsyncSQL:
                 PaymentsCards.amount,
                 PaymentsCards.payload,
                 PaymentsCards.is_gift,
-            ).where(PaymentsCards.status == 'confirmed', PaymentsCards.is_gift == False)
+            ).where(PaymentsCards.status.in_(_BILLING_OK_STATUSES), PaymentsCards.is_gift == False)
             for uid, tc, amt, pl, ig in (await session.execute(q2)).all():
                 d = _include(pl, ig, amt)
                 if d is not None:
@@ -978,7 +1038,7 @@ class AsyncSQL:
                 PaymentsPlategaCrypto.payload,
                 PaymentsPlategaCrypto.is_gift,
             ).where(
-                PaymentsPlategaCrypto.status == 'confirmed',
+                PaymentsPlategaCrypto.status.in_(_BILLING_OK_STATUSES),
                 PaymentsPlategaCrypto.is_gift == False,
             )
             for uid, tc, amt, pl, ig in (await session.execute(q3)).all():
@@ -992,7 +1052,7 @@ class AsyncSQL:
                 PaymentsStars.amount,
                 PaymentsStars.payload,
                 PaymentsStars.is_gift,
-            ).where(PaymentsStars.status == 'confirmed', PaymentsStars.is_gift == False)
+            ).where(PaymentsStars.status.in_(_BILLING_OK_STATUSES), PaymentsStars.is_gift == False)
             for uid, tc, amt, pl, ig in (await session.execute(q4)).all():
                 d = _include(pl, ig, amt)
                 if d is not None:
@@ -1004,7 +1064,7 @@ class AsyncSQL:
                 PaymentsCryptobot.amount,
                 PaymentsCryptobot.payload,
                 PaymentsCryptobot.is_gift,
-            ).where(PaymentsCryptobot.status == 'paid', PaymentsCryptobot.is_gift == False)
+            ).where(PaymentsCryptobot.status.in_(_BILLING_OK_STATUSES), PaymentsCryptobot.is_gift == False)
             for uid, tc, amt, pl, ig in (await session.execute(q5)).all():
                 d = _include(pl, ig, amt)
                 if d is not None:

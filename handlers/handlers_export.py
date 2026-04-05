@@ -518,14 +518,16 @@ def _build_billing_xlsx(events: List[Tuple[int, datetime, int]]) -> str:
 async def export_billing_excel(message: Message):
     """Выгрузка метрик по оплатам обычной подписки по дням (Excel)."""
     if message.from_user.id not in ADMIN_IDS:
-        await message.answer("❌ Эта команда доступна только администраторам.")
         return
 
     await message.answer("🔄 Собираю оплаты обычной подписки и формирую Excel…")
     try:
         events = await sql.get_regular_subscription_payment_events()
         if not events:
-            await message.answer("Нет подходящих подтверждённых платежей (обычная подписка, не подарок, не mobile).")
+            await message.answer(
+                "Нет подходящих успешных платежей (confirmed/paid), обычная подписка, не подарок, не mobile, "
+                "с известной длительностью (payload или сумма по тарифам)."
+            )
             return
 
         path = await asyncio.to_thread(_build_billing_xlsx, events)
@@ -534,9 +536,8 @@ async def export_billing_excel(message: Message):
             await message.answer_document(
                 document=FSInputFile(path, filename=fname),
                 caption=(
-                    "📊 Оплаты обычной подписки (без «Включи мобильный интернет»), календарные дни по МСК.\n"
-                    "П.6: среди тех, кто хоть раз платил, к концу дня дата окончания подписки (по сумме длительностей "
-                    "платежей) раньше начала следующего дня по МСК — то есть доступ не продлён."
+                    "📊 Оплаты обычной подписки (без «Включи мобильный интернет»), статусы confirmed/paid, "
+                    "календарные дни по МСК. Длительность из payload или по сумме (старые платежи без payload)."
                 ),
             )
         finally:

@@ -268,14 +268,6 @@ async def send_message_cron(bot: Bot):
 повторный триал: {sent_count_second_chance}
 
 Не получилось: {failed_count}
-
-— ID по типам —
-{_format_ids_line('за 7 дней', ids_7)}
-{_format_ids_line('за 3 дня', ids_3)}
-{_format_ids_line('за 1 день', ids_1)}
-{_format_ids_line('за 1 час', ids_0)}
-{_format_ids_line('после окончания (push_off)', ids_week)}
-{_format_ids_line('повторный триал (second_chance)', ids_second_chance)}
 '''
     await _send_admin_text_chunks(bot, 1012882762, report_body)
     total_sent = len(all_sent_ids)

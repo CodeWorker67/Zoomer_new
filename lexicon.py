@@ -10,7 +10,7 @@ lexicon = {
           '👉 Для получения доступа к VPN:\n'
     '1️⃣ Нажмите "<b>🔥 Попробовать бесплатно</b>" — 5 дней бесплатно\n'
     '2️⃣ Или "<b>💰 Купить подписку</b>" — сразу выбрать платный тариф\n\n'
-          'Не получилось? - напишите в <a href="https://t.me/suppzoomvpn">Поддержку</a> \n\n'
+          'Не получилось? - напишите в <a href="https://t.me/suppzoomvpn">Поддержку</a> или на почту Zoomerskysupp@proton.me\n\n'
             'При использование наших услуг вы автоматически соглашаетесь на наши:\n\n'
           ' - <a href="https://telegra.ph/Polzovatelskoe-soglashenie-12-30-35">Пользовательское соглашение.</a>\n'
           ' - <a href="https://telegra.ph/Politika-konfidencialnosti-12-30-37">Политика конфиденциальности.</a>',
@@ -21,7 +21,7 @@ lexicon = {
           '👉 Для получения доступа к VPN:\n'
           '1️⃣ Нажмите на кнопку "<b>💰 Купить подписку</b>" выберите тариф\n'
           '2️⃣ Нажмите на кнопку "<b>🔗 Подключить VPN</b>" и следуйте инструкциям из этого раздела\n\n'
-          'Не получилось? - напишите в <a href="https://t.me/suppzoomvpn">Поддержку</a> \n\n'
+          'Не получилось? - напишите в <a href="https://t.me/suppzoomvpn">Поддержку</a> или на почту Zoomerskysupp@proton.me\n\n'
           'При использование наших услуг вы автоматически соглашаетесь на наши:\n\n'
           ' - <a href="https://telegra.ph/Polzovatelskoe-soglashenie-12-30-35">Пользовательское соглашение.</a>\n'
           ' - <a href="https://telegra.ph/Politika-konfidencialnosti-12-30-37">Политика конфиденциальности.</a>',
@@ -67,7 +67,7 @@ lexicon = {
           '|\n'
           '└ <code>https://t.me/zoomerskyvpn_bot?start=ref{1}</code>\n\n'
           '❗️Нажмите на ссылку для автоматического копирования\n\n'
-          'Если есть вопросы - напишите в <a href="https://t.me/suppzoomvpn">Поддержку</a>',
+          'Если есть вопросы - напишите в <a href="https://t.me/suppzoomvpn">Поддержку</a> или на почту Zoomerskysupp@proton.me',
 
     'gift_start': 'Выберите подписку, которую вы хотите подарить другу:',
     'error_payment': 'Произошла ошибка при создании счета, попробуйте еще раз.',

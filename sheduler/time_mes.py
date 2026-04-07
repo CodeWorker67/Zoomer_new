@@ -9,6 +9,7 @@ from aiogram import Bot
 
 from bot import sql, x3
 from keyboard import keyboard_tariff, keyboard_tariff_trial, create_kb, STYLE_PRIMARY
+from telegram_ids import is_telegram_chat_id
 from lexicon import lexicon
 from logging_config import logger
 
@@ -120,6 +121,8 @@ async def send_message_cron(bot: Bot):
 
     for user_id, end_raw, in_panel, ttclid, field_str_1_raw in candidate_rows:
         try:
+            if not is_telegram_chat_id(user_id):
+                continue
             end = _normalize_end_utc(end_raw)
             if end is None:
                 continue

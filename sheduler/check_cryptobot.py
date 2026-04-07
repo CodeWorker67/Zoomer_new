@@ -1,5 +1,6 @@
 from bot import bot, sql
 from config import CRYPTOBOT_API_TOKEN
+from telegram_ids import is_telegram_chat_id
 from keyboard import keyboard_payment_cancel
 from lexicon import lexicon
 from logging_config import logger
@@ -51,12 +52,13 @@ async def check_cryptobot_payments():
                     confirmed += 1
                 elif status == 'expired':
                     expired += 1
-                    try:
-                        user_id = payment.user_id
-                        cancel_text = lexicon['payment_cancel']
-                        await bot.send_message(user_id, cancel_text, reply_markup=keyboard_payment_cancel())
-                    except Exception as e:
-                        logger.error(f"Failed to notify user {payment.user_id}: {e}")
+                    user_id = payment.user_id
+                    if is_telegram_chat_id(user_id):
+                        try:
+                            cancel_text = lexicon['payment_cancel']
+                            await bot.send_message(user_id, cancel_text, reply_markup=keyboard_payment_cancel())
+                        except Exception as e:
+                            logger.error(f"Failed to notify user {payment.user_id}: {e}")
 
                 processed += 1
 

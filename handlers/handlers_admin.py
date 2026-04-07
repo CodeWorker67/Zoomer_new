@@ -5,6 +5,7 @@ from sqlalchemy import select
 
 from bot import sql, x3, bot
 from config import ADMIN_IDS
+from telegram_ids import is_telegram_chat_id
 from config_bd.models import Users
 from keyboard import create_kb
 from logging_config import logger
@@ -146,17 +147,25 @@ async def set_subscription_date(message: Message):
             f"📝 Тип: {'white' if is_white else 'обычная'}\n"
             f"💾 База данных обновлена."
         )
-        try:
-            await bot.send_message(
-                chat_id=user_id,
-                text=f"✅ Вам обновлена дата подписки!\n\n"
-                f"📅 Новая дата окончания подписки: {actual_date.strftime('%Y-%m-%d %H:%M:%S')}\n"
-                f"📝 Тариф: {'🦾 Включи мобильный интернет' if is_white else '💫 подписка на VPN'}\n",
-                reply_markup=create_kb(1, back_to_main='🔙 Назад')
+        if not is_telegram_chat_id(user_id):
+            await message.answer(
+                "ℹ️ Уведомление в Telegram пользователю не отправлялось: "
+                "для этого user_id нет личного чата (например, аккаунт только с сайта)."
             )
-        except Exception as e:
-            logger.error(f"Ошибка при отправке сообщения пользователю {user_id}: {e}")
-            await message.answer(f"❌ Произошла ошибка при отправке сообщения пользователю {user_id}: {str(e)}")
+        else:
+            try:
+                await bot.send_message(
+                    chat_id=user_id,
+                    text=f"✅ Вам обновлена дата подписки!\n\n"
+                    f"📅 Новая дата окончания подписки: {actual_date.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                    f"📝 Тариф: {'🦾 Включи мобильный интернет' if is_white else '💫 подписка на VPN'}\n",
+                    reply_markup=create_kb(1, back_to_main='🔙 Назад')
+                )
+            except Exception as e:
+                logger.error(f"Ошибка при отправке сообщения пользователю {user_id}: {e}")
+                await message.answer(
+                    f"❌ Произошла ошибка при отправке сообщения пользователю {user_id}: {str(e)}"
+                )
 
     except Exception as e:
         logger.error(f"Ошибка в команде /sub: {e}")
@@ -626,8 +635,12 @@ async def send_push_command(message: Message):
 
     success_count = 0
     fail_count = 0
+    skipped_non_tg = 0
 
     for user_id in candidates:
+        if not is_telegram_chat_id(user_id):
+            skipped_non_tg += 1
+            continue
         try:
             await bot.send_message(user_id,
                                    push_text,
@@ -643,7 +656,8 @@ async def send_push_command(message: Message):
 
     await message.answer(
         f"✅ Рассылка завершена.\n"
-        f"👥 Найдено: {len(candidates)}\n"
+        f"👥 В списке: {len(candidates)}\n"
+        f"⏭ Пропущено (не Telegram user id): {skipped_non_tg}\n"
         f"✅ Успешно: {success_count}\n"
         f"❌ Ошибок: {fail_count}"
     )

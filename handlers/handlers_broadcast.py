@@ -2,6 +2,7 @@ import urllib.parse
 
 from bot import sql
 from config import ADMIN_IDS
+from telegram_ids import is_telegram_chat_id
 from keyboard import create_kb, keyboard_tariff_old, keyboard_tariff, STYLE_PRIMARY, STYLE_SUCCESS
 from logging_config import logger
 import asyncio
@@ -197,6 +198,8 @@ async def broadcast_confirm_send(callback: CallbackQuery, state: FSMContext, bot
     # Отправляем сообщение пользователям
     user_ids.append(1012882762)
     for user_id in user_ids:
+        if not is_telegram_chat_id(user_id):
+            continue
         try:
             await bot.copy_message(
                 chat_id=user_id,

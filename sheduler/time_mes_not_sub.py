@@ -2,6 +2,7 @@ from datetime import datetime
 
 from bot import bot, sql
 from keyboard import create_kb
+from telegram_ids import is_telegram_chat_id
 from lexicon import lexicon
 from logging_config import logger
 
@@ -27,6 +28,8 @@ async def send_push_cron(debug: bool = False):
         now = datetime.now()
 
         for user_id in all_users:
+            if not is_telegram_chat_id(user_id):
+                continue
             try:
                 # Получаем данные пользователя
                 user_data = await sql.get_user(user_id)

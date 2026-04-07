@@ -332,7 +332,7 @@ class X3:
                 "createdAt": current_time.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z',
                 "hwidDeviceLimit": hwidDeviceLimit,
                 "telegramId": int(user_id),
-                "description": "New user",
+                "description": "Test_bot",
                 "activeInternalSquads": squad
             }
 

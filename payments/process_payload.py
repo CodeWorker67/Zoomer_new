@@ -1,107 +1,204 @@
 from datetime import datetime
+from typing import Optional, Tuple
 
 from bot import x3, sql, bot
 
+from config_bd.utils import _norm_email
+from X3 import panel_username_for_site_user
 from keyboard import create_kb, keyboard_sub_after_buy
 from lexicon import lexicon
 from logging_config import logger
 
 
+async def _resolve_buyer_for_payment(
+    raw_user_id: str, white_flag: bool
+) -> Optional[Tuple[str, int, Optional[int], bool, Optional[str]]]:
+    """
+    Возвращает (
+        user_id_str для панели,
+        db_uid,
+        notify_tg_id или None,
+        use_add_client_site,
+        site_email_norm — email для add_client_site или None,
+    ).
+    raw_user_id — telegram id или email.
+    """
+    raw = str(raw_user_id).strip()
+    if "@" in raw:
+        em = _norm_email(raw)
+        row = await sql.get_user_by_email(em)
+        if row is None:
+            logger.error("Платёж: пользователь с email %s не найден в БД", em)
+            return None
+        db_uid = int(row[1])
+        linked = row[28]
+        email_norm = _norm_email(row[18] or em)
+
+        if db_uid > 0:
+            panel_base = str(db_uid)
+            notify_tg = db_uid
+        elif linked is not None and int(linked) > 0:
+            tid = int(linked)
+            panel_base = str(tid)
+            notify_tg = tid
+        else:
+            panel_base = None
+            notify_tg = None
+
+        use_site = panel_base is None
+        if use_site:
+            user_id_str = panel_username_for_site_user(db_uid, white_flag)
+            site_em = email_norm
+        else:
+            site_em = None
+            if white_flag:
+                user_id_str = panel_base + "_white"
+            else:
+                user_id_str = panel_base
+
+        return user_id_str, db_uid, notify_tg, use_site, site_em
+
+    db_uid = int(raw)
+    user_id_str = str(db_uid) + ("_white" if white_flag else "")
+    return user_id_str, db_uid, db_uid, False, None
+
+
+async def _apply_panel_subscription(
+    duration: int,
+    user_id_str: str,
+    db_uid: int,
+    white_flag: bool,
+    use_add_client_site: bool,
+    site_email_norm: Optional[str],
+) -> Tuple[bool, bool]:
+    """Продлевает/создаёт подписку в панели. Возвращает (success, existed_in_panel)."""
+    existing_user = await x3.get_user_by_username(user_id_str)
+    existed = bool(existing_user and existing_user.get("response"))
+
+    if existed:
+        logger.info("⏫ Обновляем %s на %s дней", user_id_str, duration)
+        response = await x3.updateClient(duration, user_id_str, db_uid)
+    elif use_add_client_site:
+        if not site_email_norm:
+            logger.error("add_client_site без site_email_norm")
+            return False, False
+        logger.info("➕ add_client_site %s на %s дней", user_id_str, duration)
+        response = await x3.add_client_site(duration, site_email_norm, white_flag, db_uid)
+    else:
+        logger.info("➕ Добавляем %s на %s дней", user_id_str, duration)
+        response = await x3.addClient(duration, user_id_str, db_uid)
+
+    return response, existed
+
+
 async def process_confirmed_payment(payload):
     """Обработка подтвержденного платежа"""
     try:
-        # Парсим payload
-        payload_parts = dict(item.split(':') for item in payload.split(','))
-        user_id = int(payload_parts.get('user_id', 0))
-        duration = int(payload_parts.get('duration', 0))
-        white_flag = payload_parts.get('white', 'False') == 'True'
-        is_gift = payload_parts.get('gift', 'False') == 'True'
-        method = payload_parts.get('method', '')
-        if method in ('sbp', 'stars', 'card', 'crypto', 'cryptobot'):
-            amount = int(payload_parts.get('amount', 0))
+        payload_parts = dict(item.split(":", 1) for item in payload.split(","))
+        raw_uid = payload_parts.get("user_id", "0")
+        duration = int(payload_parts.get("duration", 0))
+        white_flag = payload_parts.get("white", "False") == "True"
+        is_gift = payload_parts.get("gift", "False") == "True"
+        method = payload_parts.get("method", "")
+        if method in ("sbp", "stars", "card", "crypto", "cryptobot"):
+            amount = int(payload_parts.get("amount", 0))
         else:
-            amount = float(payload_parts.get('amount', 0.0))
+            amount = float(payload_parts.get("amount", 0.0))
 
         logger.info(
-            f"Обработка подтвержденного платежа для user={user_id}, duration={duration}, white={white_flag}, "
-            f"gift={is_gift}, method={method}, amount={amount}")
+            "Обработка подтвержденного платежа user=%s duration=%s white=%s gift=%s method=%s amount=%s",
+            raw_uid,
+            duration,
+            white_flag,
+            is_gift,
+            method,
+            amount,
+        )
 
-        # Определяем валюту для сообщения
-        if method in ['sbp', 'card', 'crypto', 'cryptobot']:
-            currency = 'руб'
-        elif method == 'stars':
-            currency = '⭐️'
-            await sql.add_payment_stars(user_id, amount, payload, is_gift)
-        elif method in ('ton', 'usdt'):
+        if method in ["sbp", "card", "crypto", "cryptobot"]:
+            currency = "руб"
+        elif method == "stars":
+            currency = "⭐️"
+            if "@" in str(raw_uid):
+                logger.error("Stars-платёж с email в user_id не поддерживается")
+                return
+            uid_stars = int(raw_uid)
+            await sql.add_payment_stars(uid_stars, amount, payload, is_gift)
+        elif method in ("ton", "usdt"):
             currency = method.upper()
         else:
-            currency = ''
+            currency = ""
 
         if is_gift:
-            # Обработка подарка
-            gift_id = await sql.create_gift(user_id, duration, white_flag)
+            if "@" in str(raw_uid):
+                row_g = await sql.get_user_by_email(_norm_email(str(raw_uid)))
+                if row_g is None:
+                    logger.error("Подарок: email не найден в БД")
+                    return
+                giver_billing_id = int(row_g[1])
+            else:
+                giver_billing_id = int(raw_uid)
 
-            # Отправляем сообщение с ссылкой на подарок
+            gift_id = await sql.create_gift(giver_billing_id, duration, white_flag)
+
             marker = ' (тариф «Включи мобильный»)' if white_flag else ''
-            gift_message = lexicon['payment_gift'].format(duration, marker, gift_id)
+            gift_message = lexicon["payment_gift"].format(duration, marker, gift_id)
 
-            try:
-                await bot.send_message(
-                    chat_id=user_id,
-                    text=gift_message,
-                    disable_web_page_preview=True
-                )
-
-                # Второе сообщение с инструкцией
-                await bot.send_message(
-                    chat_id=user_id,
-                    text=lexicon['payment_gift_faq'],
-                    reply_markup=create_kb(1, back_to_main='🔙 Назад')
-                )
-
-                logger.info(f"✅ Сообщения о подарке отправлены пользователю {user_id}")
-
-            except Exception as e:
-                logger.error(f"❌ Ошибка отправки сообщения о подарке: {e}")
+            if giver_billing_id > 0:
+                try:
+                    await bot.send_message(
+                        chat_id=giver_billing_id,
+                        text=gift_message,
+                        disable_web_page_preview=True,
+                    )
+                    await bot.send_message(
+                        chat_id=giver_billing_id,
+                        text=lexicon["payment_gift_faq"],
+                        reply_markup=create_kb(1, back_to_main="🔙 Назад"),
+                    )
+                    logger.info("✅ Сообщения о подарке отправлены пользователю %s", giver_billing_id)
+                except Exception as e:
+                    logger.error("❌ Ошибка отправки сообщения о подарке: %s", e)
+            else:
+                logger.info("Подарок (сайт): уведомление в Telegram пропущено, giver_id=%s", giver_billing_id)
 
         else:
-            # Обработка обычного платежа (не подарок)
-            # await x3.test_connect()
-            user_id_str = str(user_id)
-            if white_flag:
-                user_id_str += '_white'
+            resolved = await _resolve_buyer_for_payment(raw_uid, white_flag)
+            if resolved is None:
+                return
+            user_id_str, db_uid, notify_tg, use_add_client_site, site_email_norm = resolved
 
-            existing_user = await x3.get_user_by_username(user_id_str)
-
-            if existing_user and 'response' in existing_user and existing_user['response']:
-                logger.info(f"⏫ Обновляем {user_id_str} на {duration} дней")
-                response = await x3.updateClient(duration, user_id_str, user_id)
-            else:
-                logger.info(f"➕ Добавляем {user_id_str} на {duration} дней")
-                response = await x3.addClient(duration, user_id_str, user_id)
+            response, existing_user = await _apply_panel_subscription(
+                duration,
+                user_id_str,
+                db_uid,
+                white_flag,
+                use_add_client_site,
+                site_email_norm,
+            )
 
             if not response:
-                logger.error(f"❌ Не удалось обновить клиента {user_id_str}")
+                logger.error("❌ Не удалось обновить клиента %s", user_id_str)
                 return
 
             result_active = await x3.activ(user_id_str)
-            subscription_time = result_active.get('time', '-')
+            subscription_time = result_active.get("time", "-")
 
-            # Обновляем дату окончания подписки в БД
-            if subscription_time != '-':
+            if subscription_time != "-":
                 try:
-                    subscription_end_date = datetime.strptime(subscription_time, '%d-%m-%Y %H:%M МСК')
+                    subscription_end_date = datetime.strptime(
+                        subscription_time, "%d-%m-%Y %H:%M МСК"
+                    )
                     if white_flag:
-                        await sql.update_white_subscription_end_date(user_id, subscription_end_date)
+                        await sql.update_white_subscription_end_date(db_uid, subscription_end_date)
                     else:
-                        await sql.update_subscription_end_date(user_id, subscription_end_date)
-                    logger.info(f"✅ Дата подписки обновлена: {subscription_end_date}")
+                        await sql.update_subscription_end_date(db_uid, subscription_end_date)
+                    logger.info("✅ Дата подписки обновлена: %s", subscription_end_date)
                 except ValueError as e:
-                    logger.error(f"❌ Ошибка парсинга даты: {e}")
+                    logger.error("❌ Ошибка парсинга даты: %s", e)
 
-            # Реферальная система
             try:
-                user_data = await sql.get_user(user_id)
+                user_data = await sql.get_user(db_uid)
                 if user_data and len(user_data) > 4:
                     ref_reserve_field = user_data[8]
                     ref_id_str = user_data[2]
@@ -115,67 +212,73 @@ async def process_confirmed_payment(payload):
                                 ref_in_panel = ref_data[4]
 
                                 if ref_in_panel:
-                                    logger.info(f"🎁 Начисляем 7 дней рефереру {ref_id} за приглашение")
+                                    logger.info("🎁 Начисляем 7 дней рефереру %s за приглашение", ref_id)
 
-                                    # await x3.test_connect()
                                     ref_existing = await x3.get_user_by_username(str(ref_id))
 
-                                    if ref_existing and 'response' in ref_existing and ref_existing['response']:
+                                    if ref_existing and "response" in ref_existing and ref_existing["response"]:
                                         await x3.updateClient(7, str(ref_id), ref_id)
-                                        logger.info(f"✅ Обновлена подписка реферера {ref_id} на 7 дней")
 
                                     ref_result_active = await x3.activ(str(ref_id))
-                                    ref_subscription_time = ref_result_active.get('time', '-')
+                                    ref_subscription_time = ref_result_active.get("time", "-")
 
-                                    if ref_subscription_time != '-':
+                                    if ref_subscription_time != "-":
                                         try:
-                                            ref_subscription_end_date = datetime.strptime(ref_subscription_time,
-                                                                                          '%d-%m-%Y %H:%M МСК')
-                                            await sql.update_subscription_end_date(ref_id, ref_subscription_end_date)
-                                            logger.info(f"✅ Дата подписки реферера обновлена")
+                                            ref_subscription_end_date = datetime.strptime(
+                                                ref_subscription_time,
+                                                "%d-%m-%Y %H:%M МСК",
+                                            )
+                                            await sql.update_subscription_end_date(
+                                                ref_id, ref_subscription_end_date
+                                            )
+                                            logger.info("✅ Дата подписки реферера обновлена")
                                         except ValueError as e:
-                                            logger.error(f"❌ Ошибка парсинга даты реферера: {e}")
+                                            logger.error("❌ Ошибка парсинга даты реферера: %s", e)
 
-                                    try:
-                                        await bot.send_message(
-                                            chat_id=ref_id,
-                                            text=lexicon['ref_success'].format(user_id),
-                                            reply_markup=create_kb(1, back_to_main='🔙 Назад')
-                                        )
-                                        logger.info(f"✅ Уведомление отправлено рефереру {ref_id}")
-                                    except Exception as e:
-                                        logger.error(f"❌ Ошибка отправки уведомления рефереру: {e}")
+                                    if ref_id > 0:
+                                        try:
+                                            await bot.send_message(
+                                                chat_id=ref_id,
+                                                text=lexicon["ref_success"].format(db_uid),
+                                                reply_markup=create_kb(1, back_to_main="🔙 Назад"),
+                                            )
+                                            logger.info("✅ Уведомление отправлено рефереру %s", ref_id)
+                                        except Exception as e:
+                                            logger.error("❌ Ошибка отправки уведомления рефереру: %s", e)
 
                         except (ValueError, Exception) as e:
-                            logger.error(f"❌ Ошибка при обработке реферальной системы: {e}")
+                            logger.error("❌ Ошибка при обработке реферальной системы: %s", e)
             except Exception as e:
-                logger.error(f"❌ Ошибка при проверке реферальной системы: {e}")
+                logger.error("❌ Ошибка при проверке реферальной системы: %s", e)
 
-            # Обновляем статус оплаты в БД users
-            if await sql.get_user(user_id) is not None:
-                await sql.update_in_panel(user_id)
+            if await sql.get_user(db_uid) is not None:
+                await sql.update_in_panel(db_uid)
             else:
-                await sql.add_user(user_id, True)
-            await sql.update_reserve_field(user_id)
+                await sql.add_user(db_uid, True)
+            await sql.update_reserve_field(db_uid)
 
-            # Отправляем уведомление пользователю
-            try:
-                sub_link = await x3.sublink(user_id_str)
-                marker = 'продлена' if existing_user else 'активирована'
-                message_text = lexicon['payment_success'].format(marker, subscription_time, amount, currency, duration, sub_link)
+            if notify_tg is not None and notify_tg > 0:
+                try:
+                    sub_link = await x3.sublink(user_id_str)
+                    marker = "продлена" if existing_user else "активирована"
+                    message_text = lexicon["payment_success"].format(
+                        marker, subscription_time, amount, currency, duration, sub_link
+                    )
 
-                await bot.send_message(
-                    chat_id=user_id,
-                    text=message_text,
-                    parse_mode='HTML',
-                    disable_web_page_preview=True,
-                    reply_markup=keyboard_sub_after_buy(sub_link)
-                )
+                    await bot.send_message(
+                        chat_id=notify_tg,
+                        text=message_text,
+                        parse_mode="HTML",
+                        disable_web_page_preview=True,
+                        reply_markup=keyboard_sub_after_buy(sub_link),
+                    )
 
-                logger.info(f"✅ Уведомление отправлено пользователю {user_id}")
+                    logger.info("✅ Уведомление отправлено пользователю %s", notify_tg)
 
-            except Exception as e:
-                logger.error(f"❌ Ошибка отправки уведомления: {e}")
+                except Exception as e:
+                    logger.error("❌ Ошибка отправки уведомления: %s", e)
+            else:
+                logger.info("Платёж сайта: Telegram-уведомление не отправлялось (db_uid=%s)", db_uid)
 
     except Exception as e:
-        logger.error(f"❌ Ошибка обработки подтвержденного платежа: {e}")
+        logger.error("❌ Ошибка обработки подтвержденного платежа: %s", e)

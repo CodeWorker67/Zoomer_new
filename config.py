@@ -21,6 +21,13 @@ BOT_URL: str = os.environ.get("BOT_URL") or "https://t.me/zoomerskyvpn_bot"
 JWT_SECRET: Optional[str] = os.environ.get("JWT_SECRET")
 WEB_API_PORT: int = int(os.environ.get("WEB_API_PORT", "8080"))
 
+# Почта для сброса пароля (опционально; иначе код уходит в Telegram, если есть привязка)
+SMTP_HOST: Optional[str] = os.environ.get("SMTP_HOST")
+SMTP_PORT: int = int(os.environ.get("SMTP_PORT", "587"))
+SMTP_USER: Optional[str] = os.environ.get("SMTP_USER")
+SMTP_PASSWORD: Optional[str] = os.environ.get("SMTP_PASSWORD")
+SMTP_FROM: Optional[str] = os.environ.get("SMTP_FROM")
+
 POSTGRES_USER = os.getenv("POSTGRES_USER")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
 POSTGRES_DB = os.getenv("POSTGRES_DB")

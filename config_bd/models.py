@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, BigInteger, Date, Float
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, BigInteger, Date, Float
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncAttrs
 from sqlalchemy.orm import DeclarativeBase
 from datetime import datetime
@@ -45,8 +45,10 @@ class Users(Base):
     ttclid = Column(String(100), nullable=True)
     subscribtion = Column(String(255), nullable=True)
     white_subscription = Column(String(255), nullable=True)
-    email = Column(String(255), nullable=True)
+    email = Column(Text, nullable=True, unique=True)
     password = Column(String(255), nullable=True)
+    password_hash = Column(Text, nullable=True)
+    linked_telegram_id = Column(BigInteger, nullable=True)
     activation_pass = Column(String(255), nullable=True)
     field_str_1 = Column(String(255), nullable=True)
     field_str_2 = Column(String(255), nullable=True)
@@ -149,6 +151,26 @@ class Online(Base):
     users_active = Column(Integer, nullable=False)
     users_pay = Column(Integer, nullable=False)
     users_trial = Column(Integer, nullable=False)
+
+
+class LinkingCodes(Base):
+    __tablename__ = 'linking_codes'
+
+    code_id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(Text, nullable=False, unique=True)
+    user_id = Column(Integer, nullable=False)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+
+
+class PasswordResetCodes(Base):
+    __tablename__ = 'password_reset_codes'
+
+    pass_id = Column(Integer, primary_key=True, autoincrement=True)
+    email = Column(Text, nullable=False)
+    code = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
 
 
 # Функция для создания таблиц (запустить один раз)

@@ -1,12 +1,24 @@
 import uuid
 
-from sqlalchemy import select, update, func, and_, or_
+from sqlalchemy import select, update, delete, func, and_, or_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from datetime import datetime, date, timedelta, timezone
 from typing import Any, Optional, List, Tuple, Dict
 
-from config_bd.models import AsyncSessionLocal, Users, Payments, Gifts, PaymentsCryptobot, PaymentsStars, Online, \
-    WhiteCounter, PaymentsCards, PaymentsPlategaCrypto
+from config_bd.models import (
+    AsyncSessionLocal,
+    Users,
+    Payments,
+    Gifts,
+    PaymentsCryptobot,
+    PaymentsStars,
+    Online,
+    WhiteCounter,
+    PaymentsCards,
+    PaymentsPlategaCrypto,
+    LinkingCodes,
+    PasswordResetCodes,
+)
 from lexicon import dct_price
 from logging_config import logger
 
@@ -75,6 +87,92 @@ def _naive_utc(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 
+def _user_tuple(user: Users) -> Tuple:
+    return (
+        user.id,
+        user.user_id,
+        user.ref,
+        user.is_delete,
+        user.in_panel,
+        user.is_connect,
+        user.create_user,
+        user.in_chanel,
+        user.reserve_field,
+        user.subscription_end_date,
+        user.white_subscription_end_date,
+        user.last_notification_date,
+        user.last_broadcast_status,
+        user.last_broadcast_date,
+        user.stamp,
+        user.ttclid,
+        user.subscribtion,
+        user.white_subscription,
+        user.email,
+        user.password,
+        user.activation_pass,
+        user.field_str_1,
+        user.field_str_2,
+        user.field_str_3,
+        user.field_bool_1,
+        user.field_bool_2,
+        user.field_bool_3,
+        user.password_hash,
+        user.linked_telegram_id,
+    )
+
+
+def _users_column_value_for_api(v: Any) -> Any:
+    if v is None:
+        return None
+    if isinstance(v, datetime):
+        if v.tzinfo is None:
+            v = v.replace(tzinfo=timezone.utc)
+        return v.isoformat()
+    if isinstance(v, date):
+        return v.isoformat()
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, int):
+        return str(v)
+    return v
+
+
+def user_row_to_api_dict(user: Users) -> Dict[str, Any]:
+    """Все колонки таблицы users в JSON-совместимый словарь (имена полей как в БД)."""
+    out: Dict[str, Any] = {}
+    for col in Users.__table__.columns:
+        out[col.key] = _users_column_value_for_api(getattr(user, col.key))
+    return out
+
+
+def _norm_email(email: str) -> str:
+    return email.strip().lower()
+
+
+def _sum_subscription_end_dates(
+    a: Optional[datetime], b: Optional[datetime], now: datetime
+) -> Optional[datetime]:
+    """Суммирует оставшееся время двух подписок (вместо выбора более поздней даты)."""
+    if a is None and b is None:
+        return None
+    now_n = _naive_utc(now.astimezone(timezone.utc) if now.tzinfo else now.replace(tzinfo=timezone.utc))
+
+    def rem(dt: Optional[datetime]) -> timedelta:
+        if dt is None:
+            return timedelta(0)
+        n = _naive_utc(dt.astimezone(timezone.utc).replace(tzinfo=None) if dt.tzinfo else dt)
+        return max(timedelta(0), n - now_n)
+
+    total = rem(a) + rem(b)
+    if total == timedelta(0):
+        if a is None:
+            return _naive_utc(b) if b is not None else None
+        if b is None:
+            return _naive_utc(a) if a is not None else None
+        return max(_naive_utc(a), _naive_utc(b))
+    return now_n + total
+
+
 class AsyncSQL:
     def __init__(self):
         self.session_factory = AsyncSessionLocal
@@ -85,19 +183,268 @@ class AsyncSQL:
             result = await session.execute(stmt)
             user = result.scalar_one_or_none()
             if user:
-                return (
-                    user.id, user.user_id, user.ref, user.is_delete,
-                    user.in_panel, user.is_connect, user.create_user,
-                    user.in_chanel, user.reserve_field, user.subscription_end_date,
-                    user.white_subscription_end_date, user.last_notification_date,
-                    user.last_broadcast_status, user.last_broadcast_date,
-                    user.stamp, user.ttclid,
-                    user.subscribtion, user.white_subscription, user.email,
-                    user.password, user.activation_pass,
-                    user.field_str_1, user.field_str_2, user.field_str_3,
-                    user.field_bool_1, user.field_bool_2, user.field_bool_3,
-                )
+                return _user_tuple(user)
             return None
+
+    async def get_user_by_internal_id(self, internal_id: int) -> Optional[Tuple]:
+        async with self.session_factory() as session:
+            user = await session.get(Users, internal_id)
+            if user:
+                return _user_tuple(user)
+            return None
+
+    async def get_user_by_email(self, email: str) -> Optional[Tuple]:
+        em = _norm_email(email)
+        async with self.session_factory() as session:
+            stmt = select(Users).where(func.lower(Users.email) == em)
+            result = await session.execute(stmt)
+            user = result.scalar_one_or_none()
+            if user:
+                return _user_tuple(user)
+            return None
+
+    async def get_user_object_by_user_id(self, user_id: int) -> Optional[Users]:
+        async with self.session_factory() as session:
+            stmt = select(Users).where(Users.user_id == user_id)
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
+
+    async def get_user_object_by_internal_id(self, internal_id: int) -> Optional[Users]:
+        async with self.session_factory() as session:
+            return await session.get(Users, internal_id)
+
+    async def next_negative_user_id(self) -> int:
+        """
+        Следующий отрицательный user_id для сайта. С панелью X-UI username ≥ 3 символов,
+        поэтому первый id — -10, далее не выдаём -1…-9 (строка «-N» короче 3 символов).
+        """
+        async with self.session_factory() as session:
+            stmt = select(func.min(Users.user_id)).where(Users.user_id < 0)
+            result = await session.execute(stmt)
+            m = result.scalar_one_or_none()
+            if m is None:
+                return -10
+            nxt = int(m) - 1
+            while nxt < 0 and len(str(nxt)) < 3:
+                nxt -= 1
+            return nxt
+
+    async def register_email_user(self, email: str, password_hash: str) -> int:
+        em = _norm_email(email)
+        uid = await self.next_negative_user_id()
+        async with self.session_factory() as session:
+            u = Users(
+                user_id=uid,
+                email=em,
+                password_hash=password_hash,
+                stamp="email",
+                create_user=_naive_utc(datetime.now(timezone.utc)),
+            )
+            session.add(u)
+            await session.commit()
+            await session.refresh(u)
+            return int(u.id)
+
+    async def set_password_hash_by_internal_id(self, internal_id: int, password_hash: str) -> bool:
+        async with self.session_factory() as session:
+            stmt = (
+                update(Users)
+                .where(Users.id == internal_id)
+                .values(password_hash=password_hash)
+            )
+            r = await session.execute(stmt)
+            await session.commit()
+            return (r.rowcount or 0) > 0
+
+    async def replace_password_reset_codes(self, email: str, code: str, expires_at: datetime) -> None:
+        em = _norm_email(email)
+        exp = _naive_utc(expires_at)
+        async with self.session_factory() as session:
+            await session.execute(delete(PasswordResetCodes).where(PasswordResetCodes.email == em))
+            session.add(PasswordResetCodes(email=em, code=code, expires_at=exp))
+            await session.commit()
+
+    async def verify_password_reset_code(self, email: str, code: str) -> bool:
+        em = _norm_email(email)
+        now = _naive_utc(datetime.now(timezone.utc))
+        async with self.session_factory() as session:
+            stmt = select(PasswordResetCodes).where(
+                PasswordResetCodes.email == em,
+                PasswordResetCodes.code == code,
+                PasswordResetCodes.expires_at > now,
+            )
+            row = (await session.execute(stmt)).scalar_one_or_none()
+            return row is not None
+
+    async def delete_password_reset_codes_for_email(self, email: str) -> None:
+        em = _norm_email(email)
+        async with self.session_factory() as session:
+            await session.execute(delete(PasswordResetCodes).where(PasswordResetCodes.email == em))
+            await session.commit()
+
+    async def replace_linking_code(self, creator_internal_id: int, code: str, expires_at: datetime) -> None:
+        exp = _naive_utc(expires_at)
+        now = _naive_utc(datetime.now(timezone.utc))
+        async with self.session_factory() as session:
+            await session.execute(delete(LinkingCodes).where(LinkingCodes.user_id == creator_internal_id))
+            session.add(
+                LinkingCodes(
+                    code=code,
+                    user_id=creator_internal_id,
+                    created_at=now,
+                    expires_at=exp,
+                )
+            )
+            await session.commit()
+
+    async def get_valid_linking_code(self, code: str) -> Optional[Tuple[int, int]]:
+        """Возвращает (code_id, creator_internal_id) или None."""
+        now = _naive_utc(datetime.now(timezone.utc))
+        async with self.session_factory() as session:
+            stmt = select(LinkingCodes).where(
+                LinkingCodes.code == code,
+                LinkingCodes.expires_at > now,
+            )
+            row = (await session.execute(stmt)).scalar_one_or_none()
+            if row is None:
+                return None
+            return (int(row.code_id), int(row.user_id))
+
+    async def delete_linking_code_by_id(self, code_id: int) -> None:
+        async with self.session_factory() as session:
+            await session.execute(delete(LinkingCodes).where(LinkingCodes.code_id == code_id))
+            await session.commit()
+
+    async def delete_linking_codes_for_user_internal(self, internal_id: int) -> None:
+        async with self.session_factory() as session:
+            await session.execute(delete(LinkingCodes).where(LinkingCodes.user_id == internal_id))
+            await session.commit()
+
+    async def merge_email_placeholder_into_telegram(
+        self,
+        email_row_internal_id: int,
+        telegram_user_id: int,
+    ) -> bool:
+        """
+        Сливает строку только-email (user_id < 0) в строку Telegram (user_id > 0).
+        Email и password_hash переносятся на telegram-строку; placeholder удаляется.
+        """
+        async with self.session_factory() as session:
+            e = await session.get(Users, email_row_internal_id)
+            if e is None or e.user_id >= 0:
+                return False
+            stmt = select(Users).where(Users.user_id == telegram_user_id)
+            t = (await session.execute(stmt)).scalar_one_or_none()
+            if t is None or t.user_id <= 0:
+                return False
+
+            merge_now = datetime.now(timezone.utc)
+
+            # uq_users_email: нельзя присвоить t.email пока та же строка есть у e — сначала снимаем с placeholder
+            merged_email = e.email
+            merged_password_hash = e.password_hash
+            e.email = None
+            e.password_hash = None
+            await session.flush()
+
+            t.subscription_end_date = _sum_subscription_end_dates(
+                t.subscription_end_date, e.subscription_end_date, merge_now
+            )
+            t.white_subscription_end_date = _sum_subscription_end_dates(
+                t.white_subscription_end_date, e.white_subscription_end_date, merge_now
+            )
+            t.in_panel = bool(t.in_panel or e.in_panel)
+            t.in_chanel = bool(t.in_chanel or e.in_chanel)
+            t.is_connect = bool(t.is_connect or e.is_connect)
+            t.is_delete = bool(t.is_delete or e.is_delete)
+            t.reserve_field = bool(t.reserve_field or e.reserve_field)
+            if not (t.ref or "") and (e.ref or ""):
+                t.ref = e.ref
+            if merged_email:
+                t.email = merged_email
+            if merged_password_hash:
+                t.password_hash = merged_password_hash
+            if (e.stamp or "") and (e.stamp or "") != "email":
+                if not (t.stamp or "") or (t.stamp or "") == "email":
+                    t.stamp = e.stamp
+            if not (t.ttclid or "") and (e.ttclid or ""):
+                t.ttclid = e.ttclid
+            if not (t.subscribtion or "") and (e.subscribtion or ""):
+                t.subscribtion = e.subscribtion
+            if not (t.white_subscription or "") and (e.white_subscription or ""):
+                t.white_subscription = e.white_subscription
+            t.field_bool_1 = bool(t.field_bool_1 or e.field_bool_1)
+            t.field_bool_2 = bool(t.field_bool_2 or e.field_bool_2)
+            t.field_bool_3 = bool(t.field_bool_3 or e.field_bool_3)
+
+            old_uid = e.user_id
+            await session.delete(e)
+            await session.flush()
+
+            await session.execute(
+                update(Users).where(Users.ref == str(old_uid)).values(ref=str(telegram_user_id))
+            )
+            await session.execute(
+                update(Gifts).where(Gifts.giver_id == old_uid).values(giver_id=telegram_user_id)
+            )
+            await session.execute(
+                update(Gifts).where(Gifts.recepient_id == old_uid).values(recepient_id=telegram_user_id)
+            )
+            for model in (
+                Payments,
+                PaymentsCards,
+                PaymentsPlategaCrypto,
+                PaymentsStars,
+                PaymentsCryptobot,
+                WhiteCounter,
+            ):
+                await session.execute(
+                    update(model).where(model.user_id == old_uid).values(user_id=telegram_user_id)
+                )
+
+            await session.execute(delete(LinkingCodes).where(LinkingCodes.user_id == email_row_internal_id))
+            await session.commit()
+
+        merged_email_kept = _norm_email(merged_email) if merged_email else None
+        try:
+            from bot import x3
+            from X3 import (
+                panel_username_for_site_email,
+                panel_username_for_site_user,
+            )
+
+            if merged_email_kept:
+                await x3.delete_panel_user_by_username(
+                    panel_username_for_site_email(merged_email_kept, False)
+                )
+                await x3.delete_panel_user_by_username(
+                    panel_username_for_site_email(merged_email_kept, True)
+                )
+            await x3.delete_panel_user_by_username(
+                panel_username_for_site_user(old_uid, False)
+            )
+            await x3.delete_panel_user_by_username(
+                panel_username_for_site_user(old_uid, True)
+            )
+
+            row = await self.get_user(telegram_user_id)
+            if row:
+                def _aware_utc(dt: datetime) -> datetime:
+                    if dt.tzinfo is None:
+                        return dt.replace(tzinfo=timezone.utc)
+                    return dt.astimezone(timezone.utc)
+
+                sub_end = row[9]
+                w_end = row[10]
+                tid = int(row[1])
+                if sub_end:
+                    await x3.set_expiration_date(str(tid), _aware_utc(sub_end), tid)
+                if w_end:
+                    await x3.set_expiration_date(str(tid) + "_white", _aware_utc(w_end), tid)
+        except Exception as ex:
+            logger.warning("post-merge panel cleanup/sync: %s", ex)
+
+        return True
 
     async def add_user(
         self,

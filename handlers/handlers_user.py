@@ -6,14 +6,28 @@ from keyboard import (keyboard_start, keyboard_start_bonus, keyboard_tariff_bonu
                       keyboard_inline_ref)
 from logging_config import logger
 import asyncio
+import re
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, ChatMemberUpdated, InlineQueryResultArticle, InputTextMessageContent, \
     InlineQuery
-from aiogram.filters import ChatMemberUpdatedFilter, KICKED, MEMBER, Command
+from aiogram.filters import BaseFilter, ChatMemberUpdatedFilter, KICKED, MEMBER, Command
 from lexicon import lexicon
 
 
 router: Router = Router()
+
+
+_LINKING_CODE_TEXT = re.compile(r"^[A-Za-z0-9]{8}$")
+
+
+class LinkingCodeMessageFilter(BaseFilter):
+    """Ровно 8 латинских букв/цифр (код привязки с сайта)."""
+
+    async def __call__(self, message: Message) -> bool:
+        t = (message.text or "").strip()
+        if t.startswith("/"):
+            return False
+        return bool(_LINKING_CODE_TEXT.fullmatch(t))
 
 
 # Этот хэндлер срабатывает на команду /start
@@ -333,6 +347,36 @@ async def handle_chat_member_update(update: ChatMemberUpdated):
     elif update.old_chat_member.status != "left" and update.new_chat_member.status == "left":
         await sql.update_in_chanel(user_id, False)
         logger.warning(f"User {user_id} left chanel")
+
+
+@router.message(LinkingCodeMessageFilter())
+async def process_account_linking_code(message: Message):
+    code = message.text.strip().upper()
+    hit = await sql.get_valid_linking_code(code)
+    if hit is None:
+        await message.answer(lexicon["linking_invalid"])
+        return
+    code_id, creator_internal_id = hit
+    creator = await sql.get_user_by_internal_id(creator_internal_id)
+    if creator is None:
+        await sql.delete_linking_code_by_id(code_id)
+        await message.answer(lexicon["linking_invalid"])
+        return
+
+    if creator[1] is not None and int(creator[1]) > 0:
+        await message.answer(lexicon["linking_use_web"])
+        return
+
+    tg_id = message.from_user.id
+    if await sql.get_user(tg_id) is None:
+        await sql.add_user(tg_id, False, False)
+
+    ok = await sql.merge_email_placeholder_into_telegram(creator_internal_id, tg_id)
+    if ok:
+        await sql.delete_linking_code_by_id(code_id)
+        await message.answer(lexicon["linking_ok"].format(tg_id))
+    else:
+        await message.answer(lexicon["linking_fail"])
 
 
 @router.inline_query(lambda query: query.query == 'partner')

@@ -697,6 +697,20 @@ class X3:
             logger.error(f"Ошибка при получении всех пользователей: {e}")
         return lst_users
 
+    async def _sync_shortuuid_to_db(self, username: str, user_id: int, panel_user: dict) -> None:
+        """Пишет shortUuid из ответа панели в subscribtion / white_subscription (username …_white)."""
+        su = (panel_user or {}).get("shortUuid") or (panel_user or {}).get("shortuuid")
+        if not su:
+            return
+        sql = AsyncSQL()
+        try:
+            if str(username).endswith("_white"):
+                await sql.update_white_subscription(int(user_id), str(su))
+            else:
+                await sql.update_subscribtion(int(user_id), str(su))
+        except Exception as e:
+            logger.warning("shortUuid → БД для %s (user_id=%s): %s", username, user_id, e)
+
     async def set_expiration_date(self, username: str, target_date: datetime, user_id: int):
         """
         Устанавливает точную дату окончания подписки для пользователя в панели.
@@ -720,7 +734,11 @@ class X3:
                 logger.error(f"Не удалось получить данные созданного пользователя {username}")
                 return False, None
 
-        user = user_data['response']
+        raw_resp = user_data['response']
+        user = raw_resp[0] if isinstance(raw_resp, list) else raw_resp
+        if not user or 'uuid' not in user:
+            logger.error(f"Некорректный ответ панели для {username}")
+            return False, None
         uuid_user = user['uuid']
 
         # Формируем данные для обновления (сохраняем остальные поля)
@@ -752,6 +770,7 @@ class X3:
                         resp_json = await response.json()
                         if resp_json.get('success', True):
                             logger.info(f"✅ Установлена дата {effective_date} для {username}")
+                            await self._sync_shortuuid_to_db(username, user_id, user)
                             return True, effective_date
                         else:
                             logger.error(f"Ошибка API при установке даты: {resp_json}")
@@ -759,6 +778,7 @@ class X3:
                     except:
                         # Нет JSON, но статус 200 – считаем успехом
                         logger.warning(f"Установка даты для {username} вернула 200 без JSON, считаем успешной")
+                        await self._sync_shortuuid_to_db(username, user_id, user)
                         return True, effective_date
                 else:
                     error_text = await response.text() if response.content else "No body"

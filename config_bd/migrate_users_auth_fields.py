@@ -6,11 +6,20 @@
 
 Запуск из корня проекта (нужны переменные .env для Postgres):
   python -m config_bd.migrate_users_auth_fields
+
+  Либо напрямую (корень репозитория подставится в sys.path):
+  python config_bd/migrate_users_auth_fields.py
 """
 from __future__ import annotations
 
 import asyncio
 import sys
+from pathlib import Path
+
+# При запуске как файл путь к проекту не в sys.path — импорт config_bd падает.
+_root = Path(__file__).resolve().parent.parent
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
 
 from sqlalchemy import text
 

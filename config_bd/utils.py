@@ -446,7 +446,7 @@ class AsyncSQL:
                 if w_end:
                     await x3.set_expiration_date(str(tid) + "_white", _aware_utc(w_end), tid)
         except Exception as ex:
-            logger.warning("post-merge panel cleanup/sync: %s", ex)
+            logger.warning("post-merge panel cleanup/sync: {}", ex)
 
         return True
 

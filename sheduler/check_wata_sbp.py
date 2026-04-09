@@ -9,7 +9,7 @@ from payments.process_payload import process_confirmed_payment
 
 async def process_confirmed_wata_sbp(payment) -> None:
     if not payment.payload:
-        logger.error("WATA СБП: пустой payload для orderId=%s", payment.transaction_id)
+        logger.error("WATA СБП: пустой payload для orderId={}", payment.transaction_id)
         return
     await process_confirmed_payment(payment.payload)
 
@@ -26,7 +26,7 @@ async def check_wata_sbp() -> None:
             logger.info("✅ Нет платежей WATA СБП со статусом pending")
             return
 
-        logger.info("🔍 Найдено %s платежей WATA СБП pending", len(pending_payments))
+        logger.info("🔍 Найдено {} платежей WATA СБП pending", len(pending_payments))
         processed = confirmed = canceled = 0
 
         for payment in pending_payments:
@@ -38,14 +38,14 @@ async def check_wata_sbp() -> None:
                 if state == "paid":
                     if payment.status != "confirmed":
                         await sql.update_wata_sbp_status(order_id, "confirmed")
-                        logger.info("✅ WATA СБП оплачен orderId=%s", order_id)
+                        logger.info("✅ WATA СБП оплачен orderId={}", order_id)
                         await process_confirmed_wata_sbp(payment)
                         confirmed += 1
                     processed += 1
                 elif state in ("declined", "wrong_paid"):
                     if payment.status != "canceled":
                         await sql.update_wata_sbp_status(order_id, "canceled")
-                        logger.info("🔄 WATA СБП orderId=%s → canceled (%s)", order_id, state)
+                        logger.info("🔄 WATA СБП orderId={} → canceled ({})", order_id, state)
                         canceled += 1
                         uid = payment.user_id
                         if uid and int(uid) > 0:
@@ -56,19 +56,19 @@ async def check_wata_sbp() -> None:
                                     reply_markup=keyboard_payment_cancel(),
                                 )
                             except Exception as e:
-                                logger.error("WATA СБП cancel notify: %s", e)
+                                logger.error("WATA СБП cancel notify: {}", e)
                     processed += 1
                 else:
                     processed += 1
 
             except Exception as e:
-                logger.error("❌ WATA СБП check %s: %s", payment.transaction_id, e)
+                logger.error("❌ WATA СБП check {}: {}", payment.transaction_id, e)
 
         logger.info(
-            "✅ Проверка WATA СБП: обработано %s, подтверждено %s, отменено %s",
+            "✅ Проверка WATA СБП: обработано {}, подтверждено {}, отменено {}",
             processed,
             confirmed,
             canceled,
         )
     except Exception as e:
-        logger.error("❌ check_wata_sbp: %s", e)
+        logger.error("❌ check_wata_sbp: {}", e)

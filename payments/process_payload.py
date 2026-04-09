@@ -28,7 +28,7 @@ async def _resolve_buyer_for_payment(
         em = _norm_email(raw)
         row = await sql.get_user_by_email(em)
         if row is None:
-            logger.error("Платёж: пользователь с email %s не найден в БД", em)
+            logger.error("Платёж: пользователь с email {} не найден в БД", em)
             return None
         db_uid = int(row[1])
         linked = row[28]
@@ -76,16 +76,16 @@ async def _apply_panel_subscription(
     existed = bool(existing_user and existing_user.get("response"))
 
     if existed:
-        logger.info("⏫ Обновляем %s на %s дней", user_id_str, duration)
+        logger.info("⏫ Обновляем {} на {} дней", user_id_str, duration)
         response = await x3.updateClient(duration, user_id_str, db_uid)
     elif use_add_client_site:
         if not site_email_norm:
             logger.error("add_client_site без site_email_norm")
             return False, False
-        logger.info("➕ add_client_site %s на %s дней", user_id_str, duration)
+        logger.info("➕ add_client_site {} на {} дней", user_id_str, duration)
         response = await x3.add_client_site(duration, site_email_norm, white_flag, db_uid)
     else:
-        logger.info("➕ Добавляем %s на %s дней", user_id_str, duration)
+        logger.info("➕ Добавляем {} на {} дней", user_id_str, duration)
         response = await x3.addClient(duration, user_id_str, db_uid)
 
     return response, existed
@@ -106,7 +106,7 @@ async def process_confirmed_payment(payload):
             amount = float(payload_parts.get("amount", 0.0))
 
         logger.info(
-            "Обработка подтвержденного платежа user=%s duration=%s white=%s gift=%s method=%s amount=%s",
+            "Обработка подтвержденного платежа user={} duration={} white={} gift={} method={} amount={}",
             raw_uid,
             duration,
             white_flag,
@@ -156,11 +156,11 @@ async def process_confirmed_payment(payload):
                         text=lexicon["payment_gift_faq"],
                         reply_markup=create_kb(1, back_to_main="🔙 Назад"),
                     )
-                    logger.info("✅ Сообщения о подарке отправлены пользователю %s", giver_billing_id)
+                    logger.info("✅ Сообщения о подарке отправлены пользователю {}", giver_billing_id)
                 except Exception as e:
-                    logger.error("❌ Ошибка отправки сообщения о подарке: %s", e)
+                    logger.error("❌ Ошибка отправки сообщения о подарке: {}", e)
             else:
-                logger.info("Подарок (сайт): уведомление в Telegram пропущено, giver_id=%s", giver_billing_id)
+                logger.info("Подарок (сайт): уведомление в Telegram пропущено, giver_id={}", giver_billing_id)
 
         else:
             resolved = await _resolve_buyer_for_payment(raw_uid, white_flag)
@@ -178,7 +178,7 @@ async def process_confirmed_payment(payload):
             )
 
             if not response:
-                logger.error("❌ Не удалось обновить клиента %s", user_id_str)
+                logger.error("❌ Не удалось обновить клиента {}", user_id_str)
                 return
 
             result_active = await x3.activ(user_id_str)
@@ -193,9 +193,9 @@ async def process_confirmed_payment(payload):
                         await sql.update_white_subscription_end_date(db_uid, subscription_end_date)
                     else:
                         await sql.update_subscription_end_date(db_uid, subscription_end_date)
-                    logger.info("✅ Дата подписки обновлена: %s", subscription_end_date)
+                    logger.info("✅ Дата подписки обновлена: {}", subscription_end_date)
                 except ValueError as e:
-                    logger.error("❌ Ошибка парсинга даты: %s", e)
+                    logger.error("❌ Ошибка парсинга даты: {}", e)
 
             try:
                 user_data = await sql.get_user(db_uid)
@@ -212,7 +212,7 @@ async def process_confirmed_payment(payload):
                                 ref_in_panel = ref_data[4]
 
                                 if ref_in_panel:
-                                    logger.info("🎁 Начисляем 7 дней рефереру %s за приглашение", ref_id)
+                                    logger.info("🎁 Начисляем 7 дней рефереру {} за приглашение", ref_id)
 
                                     ref_existing = await x3.get_user_by_username(str(ref_id))
 
@@ -233,7 +233,7 @@ async def process_confirmed_payment(payload):
                                             )
                                             logger.info("✅ Дата подписки реферера обновлена")
                                         except ValueError as e:
-                                            logger.error("❌ Ошибка парсинга даты реферера: %s", e)
+                                            logger.error("❌ Ошибка парсинга даты реферера: {}", e)
 
                                     if ref_id > 0:
                                         try:
@@ -242,14 +242,14 @@ async def process_confirmed_payment(payload):
                                                 text=lexicon["ref_success"].format(db_uid),
                                                 reply_markup=create_kb(1, back_to_main="🔙 Назад"),
                                             )
-                                            logger.info("✅ Уведомление отправлено рефереру %s", ref_id)
+                                            logger.info("✅ Уведомление отправлено рефереру {}", ref_id)
                                         except Exception as e:
-                                            logger.error("❌ Ошибка отправки уведомления рефереру: %s", e)
+                                            logger.error("❌ Ошибка отправки уведомления рефереру: {}", e)
 
                         except (ValueError, Exception) as e:
-                            logger.error("❌ Ошибка при обработке реферальной системы: %s", e)
+                            logger.error("❌ Ошибка при обработке реферальной системы: {}", e)
             except Exception as e:
-                logger.error("❌ Ошибка при проверке реферальной системы: %s", e)
+                logger.error("❌ Ошибка при проверке реферальной системы: {}", e)
 
             if await sql.get_user(db_uid) is not None:
                 await sql.update_in_panel(db_uid)
@@ -273,12 +273,12 @@ async def process_confirmed_payment(payload):
                         reply_markup=keyboard_sub_after_buy(sub_link),
                     )
 
-                    logger.info("✅ Уведомление отправлено пользователю %s", notify_tg)
+                    logger.info("✅ Уведомление отправлено пользователю {}", notify_tg)
 
                 except Exception as e:
-                    logger.error("❌ Ошибка отправки уведомления: %s", e)
+                    logger.error("❌ Ошибка отправки уведомления: {}", e)
             else:
-                logger.info("Платёж сайта: Telegram-уведомление не отправлялось (db_uid=%s)", db_uid)
+                logger.info("Платёж сайта: Telegram-уведомление не отправлялось (db_uid={})", db_uid)
 
     except Exception as e:
-        logger.error("❌ Ошибка обработки подтвержденного платежа: %s", e)
+        logger.error("❌ Ошибка обработки подтвержденного платежа: {}", e)

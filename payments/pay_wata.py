@@ -51,7 +51,7 @@ class WataPayment:
             async with session.post(url, json=body, headers=self.headers) as response:
                 text = await response.text()
                 if response.status != 200:
-                    logger.error("WATA create link %s: %s", response.status, text)
+                    logger.error("WATA create link {}: {}", response.status, text)
                     raise RuntimeError(f"WATA create link HTTP {response.status}")
                 return await response.json()
 
@@ -62,10 +62,10 @@ class WataPayment:
             async with session.get(url, headers=self.headers, params=params) as response:
                 text = await response.text()
                 if response.status == 429:
-                    logger.warning("WATA transactions rate limit for orderId=%s: %s", order_id, text)
+                    logger.warning("WATA transactions rate limit for orderId={}: {}", order_id, text)
                     raise RuntimeError("WATA rate limit")
                 if response.status != 200:
-                    logger.error("WATA transactions %s: %s", response.status, text)
+                    logger.error("WATA transactions {}: {}", response.status, text)
                     raise RuntimeError(f"WATA transactions HTTP {response.status}")
                 data = await response.json()
         return data.get("items") or data.get("Items") or []
@@ -121,7 +121,7 @@ async def pay(
 ) -> Dict[str, Any]:
     token = WATA_API_SBP_KEY if kind == "sbp" else WATA_API_CARD_KEY
     if not token:
-        logger.error("WATA: отсутствует токен для %s", kind)
+        logger.error("WATA: отсутствует токен для {}", kind)
         return {"status": "error", "url": "", "id": ""}
 
     method = "wata_sbp" if kind == "sbp" else "wata_card"
@@ -141,7 +141,7 @@ async def pay(
         )
         pay_url = result.get("url") or result.get("Url") or ""
         if not pay_url:
-            logger.error("WATA: пустая ссылка в ответе %s", result)
+            logger.error("WATA: пустая ссылка в ответе {}", result)
             return {"status": "error", "url": "", "id": ""}
 
         if kind == "sbp":
@@ -153,10 +153,10 @@ async def pay(
                 int(user_id), int(val), "pending", order_id, payload, is_gift=False
             )
 
-        logger.info("WATA %s: ссылка создана orderId=%s", method, order_id)
+        logger.info("WATA {}: ссылка создана orderId={}", method, order_id)
         return {"status": "pending", "url": pay_url, "id": order_id}
     except Exception as e:
-        logger.error("WATA create payment: %s", e)
+        logger.error("WATA create payment: {}", e)
         return {"status": "error", "url": "", "id": ""}
 
 
@@ -170,7 +170,7 @@ async def pay_for_gift(
 ) -> Dict[str, Any]:
     token = WATA_API_SBP_KEY if kind == "sbp" else WATA_API_CARD_KEY
     if not token:
-        logger.error("WATA: отсутствует токен для %s", kind)
+        logger.error("WATA: отсутствует токен для {}", kind)
         return {"status": "error", "url": "", "id": ""}
 
     method = "wata_sbp" if kind == "sbp" else "wata_card"
@@ -203,7 +203,7 @@ async def pay_for_gift(
 
         return {"status": "pending", "url": pay_url, "id": order_id}
     except Exception as e:
-        logger.error("WATA gift payment: %s", e)
+        logger.error("WATA gift payment: {}", e)
         return {"status": "error", "url": "", "id": ""}
 
 
@@ -266,9 +266,9 @@ async def process_payment_wata_sbp(callback: CallbackQuery):
                 text=text,
                 reply_markup=keyboard_payment_sbp("⚡ Оплатить СБП", payment_info["url"]),
             )
-            logger.info("Юзер %s создал WATA СБП %s руб", user_id, rub_amount)
+            logger.info("Юзер {} создал WATA СБП {} руб", user_id, rub_amount)
         except Exception as e:
-            logger.error("WATA СБП UI: %s", e)
+            logger.error("WATA СБП UI: {}", e)
             await callback.message.answer(lexicon["error_payment"], reply_markup=create_kb(1, back_to_main="🔙 Назад"))
 
 
@@ -321,7 +321,7 @@ async def process_payment_wata_card(callback: CallbackQuery):
                 text=text,
                 reply_markup=keyboard_payment_sbp("💳 Оплатить картой РФ", payment_info["url"]),
             )
-            logger.info("Юзер %s создал WATA Карта %s руб", user_id, rub_amount)
+            logger.info("Юзер {} создал WATA Карта {} руб", user_id, rub_amount)
         except Exception as e:
-            logger.error("WATA Card UI: %s", e)
+            logger.error("WATA Card UI: {}", e)
             await callback.message.answer(lexicon["error_payment"], reply_markup=create_kb(1, back_to_main="🔙 Назад"))

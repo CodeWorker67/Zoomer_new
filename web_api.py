@@ -301,14 +301,14 @@ async def _deliver_reset_code(email: str, code: str, row: tuple) -> None:
             await asyncio.to_thread(_send_smtp_reset_email, email, code)
             smtp_ok = True
         except Exception as e:
-            logger.warning("SMTP password reset failed: %s", e)
+            logger.warning("SMTP password reset failed: {}", e)
     if not smtp_ok and tg is not None:
         try:
             await bot.send_message(tg, f"Код сброса пароля: {code}")
         except Exception as e:
-            logger.warning("Telegram password reset failed: %s", e)
+            logger.warning("Telegram password reset failed: {}", e)
     if not smtp_ok and tg is None:
-        logger.warning("Password reset code for %s not delivered (configure SMTP or Telegram)", email)
+        logger.warning("Password reset code for {} not delivered (configure SMTP or Telegram)", email)
 
 
 @app.post("/api/auth/telegram")
@@ -437,7 +437,7 @@ async def trial_activate(ctx: JwtCtx):
                 status.HTTP_500_INTERNAL_SERVER_ERROR,
                 "Не удалось активировать триал",
             )
-        logger.info("trial site user %s panel username=%s", billing_uid, panel_un)
+        logger.info("trial site user {} panel username={}", billing_uid, panel_un)
         result_active = await x3.activ(panel_un)
         time_str = result_active["time"]
 

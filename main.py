@@ -66,7 +66,7 @@ async def main() -> None:
 
     try:
         await bot.delete_webhook(drop_pending_updates=True)
-        logger.info("Bot start polling, web API on port %s.", WEB_API_PORT)
+        logger.info("Bot start polling, web API on port {}.", WEB_API_PORT)
         bot_task = asyncio.create_task(dp.start_polling(bot))
         api_task = asyncio.create_task(server.serve())
         await asyncio.gather(bot_task, api_task)

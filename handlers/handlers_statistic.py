@@ -14,7 +14,7 @@ from openpyxl.chart import LineChart, BarChart, Reference
 from sqlalchemy import select, func
 
 from bot import sql
-from config import ADMIN_IDS, CHECKER_ID
+from config import ADMIN_IDS, CHECKER_ID, CHECKER_IDS
 from logging_config import logger
 from config_bd.models import AsyncSessionLocal, Users, Payments, PaymentsStars, PaymentsCryptobot, PaymentsCards, \
     PaymentsPlategaCrypto, PaymentsWataSBP, PaymentsWataCard
@@ -35,6 +35,8 @@ _REF_ZALIV_STRS = (
 REF_ZALIV = set(_REF_ZALIV_STRS)
 if CHECKER_ID is not None:
     REF_ZALIV.add(str(CHECKER_ID))
+for _checker_uid in CHECKER_IDS:
+    REF_ZALIV.add(str(_checker_uid))
 
 EXCLUDE_IDS = list(range(45, 1046))
 
@@ -226,10 +228,11 @@ def _sync_build_analytics_excel(monthly_data: dict, daily_data_by_month: dict) -
 
 @router.message(Command(commands=['stat']))
 async def stat_command(message: Message):
-    """Статистика по пользователям с указанным Ref или stamp (админы и CHECKER_ID)."""
-    if message.from_user.id not in ADMIN_IDS and (
-        CHECKER_ID is None or message.from_user.id != CHECKER_ID
-    ):
+    """Статистика по пользователям с указанным Ref или stamp (админы, CHECKER_IDS, CHECKER_ID)."""
+    allowed = ADMIN_IDS | CHECKER_IDS
+    if CHECKER_ID is not None:
+        allowed = allowed | {CHECKER_ID}
+    if message.from_user.id not in allowed:
         return
 
     args = message.text.split()

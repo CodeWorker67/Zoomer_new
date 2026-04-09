@@ -709,7 +709,7 @@ class X3:
             else:
                 await sql.update_subscribtion(int(user_id), str(su))
         except Exception as e:
-            logger.warning("shortUuid → БД для %s (user_id=%s): %s", username, user_id, e)
+            logger.warning("shortUuid → БД для {} (user_id={}): {}", username, user_id, e)
 
     async def set_expiration_date(self, username: str, target_date: datetime, user_id: int):
         """

@@ -10,6 +10,7 @@ TG_TOKEN: Optional[str] = os.environ.get("TG_TOKEN")
 ADMIN_IDS: Set[int] = {int(x) for x in os.environ.get("ADMIN_IDS", "").split(', ')} if os.environ.get("ADMIN_IDS") else set()
 _cid = os.environ.get("CHECKER_ID")
 CHECKER_ID: Optional[int] = int(_cid) if _cid else None
+CHECKER_IDS: Set[int] = {int(x) for x in os.environ.get("CHECKER_IDS", "").split(', ')} if os.environ.get("CHECKER_IDS") else set()
 PLATEGA_API_KEY: Optional[str] = os.environ.get("PLATEGA_API_KEY")
 PLATEGA_MERCHANT_ID: Optional[str] = os.environ.get("PLATEGA_MERCHANT_ID")
 WATA_API_SBP_KEY: Optional[str] = os.environ.get("WATA_API_SBP_KEY")

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 
 from bot import sql, x3, bot
-from config import ADMIN_IDS
+from config import ADMIN_IDS, CHECKER_ID
 from telegram_ids import is_telegram_chat_id
 from config_bd.models import Users
 from keyboard import create_kb
@@ -593,7 +593,7 @@ async def check_users_command(message: Message):
 
 @router.message(Command(commands=['send_push']))
 async def send_push_command(message: Message):
-    if message.from_user.id != 1012882762:
+    if CHECKER_ID is None or message.from_user.id != CHECKER_ID:
         return
 
     await message.answer("🔄 Начинаю отправку push-уведомления...")
@@ -605,7 +605,7 @@ async def send_push_command(message: Message):
     all_users = await sql.get_all_users()
 
     # Фильтруем
-    candidates = [1012882762]
+    candidates = [CHECKER_ID]
     for user in all_users:
         if user.is_delete:
             continue

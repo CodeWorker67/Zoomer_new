@@ -14,21 +14,27 @@ from openpyxl.chart import LineChart, BarChart, Reference
 from sqlalchemy import select, func
 
 from bot import sql
-from config import ADMIN_IDS, CHECKER_IDS
+from config import ADMIN_IDS, CHECKER_ID
 from logging_config import logger
 from config_bd.models import AsyncSessionLocal, Users, Payments, PaymentsStars, PaymentsCryptobot, PaymentsCards, \
-    PaymentsPlategaCrypto
+    PaymentsPlategaCrypto, PaymentsWataSBP, PaymentsWataCard
 
 router = Router()
 
-REF_ZALIV = [
-    '1012882762', '1751833324', '7715104509', '6045891248', '778794666',
+# Excel: без усечения 50/20 — длинные подписи метрик и значения полностью видны в «кастомной» аналитике
+_EXCEL_COL_WIDTH_MAX = 255
+
+_REF_ZALIV_STRS = (
+    '1751833324', '7715104509', '6045891248', '778794666',
     '6803123509', '7623377322', '8036879919', '8185054692', '7208737418',
     '7545883972', '7801801881', '7231201607', '7863386911', '7251811519',
     '7717099908', '6514719405', '8154969535', '8196772935', '7985311643',
     '7607443801', '7617180616', '7780587251', '7999153238', '8075803624',
-    '7774377890', '7939767168'
-]
+    '7774377890', '7939767168',
+)
+REF_ZALIV = set(_REF_ZALIV_STRS)
+if CHECKER_ID is not None:
+    REF_ZALIV.add(str(CHECKER_ID))
 
 EXCLUDE_IDS = list(range(45, 1046))
 
@@ -155,7 +161,7 @@ def _sync_build_analytics_excel(monthly_data: dict, daily_data_by_month: dict) -
         for cell in col:
             if cell.value:
                 max_len = max(max_len, len(str(cell.value)))
-        ws_main.column_dimensions[col_letter].width = min(max_len + 2, 50)
+        ws_main.column_dimensions[col_letter].width = min(max_len + 2, _EXCEL_COL_WIDTH_MAX)
 
     ws_main.freeze_panes = 'B2'
 
@@ -185,7 +191,7 @@ def _sync_build_analytics_excel(monthly_data: dict, daily_data_by_month: dict) -
             for cell in col:
                 if cell.value:
                     max_len = max(max_len, len(str(cell.value)))
-            ws.column_dimensions[col_letter].width = min(max_len + 2, 20)
+            ws.column_dimensions[col_letter].width = min(max_len + 2, _EXCEL_COL_WIDTH_MAX)
 
         chart1 = LineChart()
         chart1.title = "Накопительные показатели"
@@ -220,8 +226,10 @@ def _sync_build_analytics_excel(monthly_data: dict, daily_data_by_month: dict) -
 
 @router.message(Command(commands=['stat']))
 async def stat_command(message: Message):
-    """Статистика по пользователям с указанным Ref или stamp (админы и CHECKER_IDS)."""
-    if message.from_user.id not in ADMIN_IDS | CHECKER_IDS:
+    """Статистика по пользователям с указанным Ref или stamp (админы и CHECKER_ID)."""
+    if message.from_user.id not in ADMIN_IDS and (
+        CHECKER_ID is None or message.from_user.id != CHECKER_ID
+    ):
         return
 
     args = message.text.split()
@@ -319,12 +327,40 @@ async def analytics_export(message: Message):
                     )
                 ).all()
             }
+            paid_wata_sbp = {
+                row[0]
+                for row in (
+                    await paid_session.execute(
+                        select(PaymentsWataSBP.user_id)
+                        .distinct()
+                        .where(
+                            PaymentsWataSBP.status == 'confirmed',
+                            PaymentsWataSBP.amount != 1,
+                        )
+                    )
+                ).all()
+            }
+            paid_wata_card = {
+                row[0]
+                for row in (
+                    await paid_session.execute(
+                        select(PaymentsWataCard.user_id)
+                        .distinct()
+                        .where(
+                            PaymentsWataCard.status == 'confirmed',
+                            PaymentsWataCard.amount != 1,
+                        )
+                    )
+                ).all()
+            }
             all_paid_users = (
                 paid_main
                 | paid_stars
                 | paid_crypto
                 | paid_cards
                 | paid_platega_crypto
+                | paid_wata_sbp
+                | paid_wata_card
             )
 
         for year, month in months:
@@ -458,6 +494,23 @@ async def analytics_export(message: Message):
                     if uid in set_new_total:
                         new_payments_amounts.append((uid, amt))
 
+                stmt_wata_sbp_new = select(PaymentsWataSBP.user_id, PaymentsWataSBP.amount).where(
+                    PaymentsWataSBP.time_created.between(start_date, end_date),
+                    PaymentsWataSBP.amount != 1,
+                    PaymentsWataSBP.status == 'confirmed',
+                )
+                for uid, amt in (await session.execute(stmt_wata_sbp_new)).all():
+                    if uid in set_new_total:
+                        new_payments_amounts.append((uid, amt))
+
+                stmt_wata_card_new = select(PaymentsWataCard.user_id, PaymentsWataCard.amount).where(
+                    PaymentsWataCard.time_created.between(start_date, end_date),
+                    PaymentsWataCard.amount != 1,
+                    PaymentsWataCard.status == 'confirmed',
+                )
+                for uid, amt in (await session.execute(stmt_wata_card_new)).all():
+                    if uid in set_new_total:
+                        new_payments_amounts.append((uid, amt))
 
                 pay_sum_total = 0
                 pay_sum_zaliv = 0
@@ -529,6 +582,22 @@ async def analytics_export(message: Message):
                     PaymentsPlategaCrypto.status == 'confirmed'
                 )
                 for amount, is_gift in (await session.execute(stmt_platega_crypto_all)).all():
+                    all_payments.append((amount, is_gift))
+
+                stmt_wata_sbp_all = select(PaymentsWataSBP.amount, PaymentsWataSBP.is_gift).where(
+                    PaymentsWataSBP.time_created.between(start_date, end_date),
+                    PaymentsWataSBP.amount != 1,
+                    PaymentsWataSBP.status == 'confirmed',
+                )
+                for amount, is_gift in (await session.execute(stmt_wata_sbp_all)).all():
+                    all_payments.append((amount, is_gift))
+
+                stmt_wata_card_all = select(PaymentsWataCard.amount, PaymentsWataCard.is_gift).where(
+                    PaymentsWataCard.time_created.between(start_date, end_date),
+                    PaymentsWataCard.amount != 1,
+                    PaymentsWataCard.status == 'confirmed',
+                )
+                for amount, is_gift in (await session.execute(stmt_wata_card_all)).all():
                     all_payments.append((amount, is_gift))
 
                 total_revenue = sum(p[0] for p in all_payments)

@@ -12,6 +12,7 @@ from keyboard import keyboard_tariff, keyboard_tariff_trial, create_kb, STYLE_PR
 from telegram_ids import is_telegram_chat_id
 from lexicon import lexicon
 from logging_config import logger
+from config import CHECKER_ID
 
 WINDOW = timedelta(minutes=10)
 STATE_VERSION = 1
@@ -99,12 +100,13 @@ async def send_message_cron(bot: Bot):
     now = _utc_now_naive()
     window_end = now + WINDOW
     candidate_rows = await sql.select_rows_for_subscription_expiry_push(now, WINDOW)
-    await bot.send_message(
-        1012882762,
-        'Начинаю рассылку. Окно UTC+0: '
-        f'{_fmt_utc0(now)} — {_fmt_utc0(window_end)} '
-        f'({WINDOW}). Кандидатов: {len(candidate_rows)}.',
-    )
+    if CHECKER_ID is not None:
+        await bot.send_message(
+            CHECKER_ID,
+            'Начинаю рассылку. Окно UTC+0: '
+            f'{_fmt_utc0(now)} — {_fmt_utc0(window_end)} '
+            f'({WINDOW}). Кандидатов: {len(candidate_rows)}.',
+        )
     sent_count_7 = 0
     sent_count_3 = 0
     sent_count_1 = 0
@@ -272,7 +274,8 @@ async def send_message_cron(bot: Bot):
 
 Не получилось: {failed_count}
 '''
-    await _send_admin_text_chunks(bot, 1012882762, report_body)
+    if CHECKER_ID is not None:
+        await _send_admin_text_chunks(bot, CHECKER_ID, report_body)
     total_sent = len(all_sent_ids)
     logger.info(
         f"Уведомлений отправлено: {total_sent}"

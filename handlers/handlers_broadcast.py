@@ -1,7 +1,7 @@
 import urllib.parse
 
 from bot import sql
-from config import ADMIN_IDS
+from config import ADMIN_IDS, CHECKER_ID
 from telegram_ids import is_telegram_chat_id
 from keyboard import create_kb, keyboard_tariff_old, keyboard_tariff, STYLE_PRIMARY, STYLE_SUCCESS
 from logging_config import logger
@@ -196,7 +196,8 @@ async def broadcast_confirm_send(callback: CallbackQuery, state: FSMContext, bot
         return
     count = 0
     # Отправляем сообщение пользователям
-    user_ids.append(1012882762)
+    if CHECKER_ID is not None:
+        user_ids.append(CHECKER_ID)
     for user_id in user_ids:
         if not is_telegram_chat_id(user_id):
             continue

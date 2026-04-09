@@ -8,9 +8,14 @@ load_dotenv()
 
 TG_TOKEN: Optional[str] = os.environ.get("TG_TOKEN")
 ADMIN_IDS: Set[int] = {int(x) for x in os.environ.get("ADMIN_IDS", "").split(', ')} if os.environ.get("ADMIN_IDS") else set()
-CHECKER_IDS: Set[int] = {int(x) for x in os.environ.get("CHECKER_IDS", "").split(', ')} if os.environ.get("CHECKER_IDS") else set()
+_cid = os.environ.get("CHECKER_ID")
+CHECKER_ID: Optional[int] = int(_cid) if _cid else None
 PLATEGA_API_KEY: Optional[str] = os.environ.get("PLATEGA_API_KEY")
 PLATEGA_MERCHANT_ID: Optional[str] = os.environ.get("PLATEGA_MERCHANT_ID")
+WATA_API_SBP_KEY: Optional[str] = os.environ.get("WATA_API_SBP_KEY")
+WATA_API_CARD_KEY: Optional[str] = os.environ.get("WATA_API_CARD_KEY")
+# Боевой: https://api.wata.pro/api/h2h — песочница: https://api-sandbox.wata.pro/api/h2h
+WATA_API_BASE: str = os.environ.get("WATA_API_BASE", "https://api.wata.pro/api/h2h").rstrip("/")
 CHANEL_ID: Optional[int] = int(os.environ.get("CHANEL_ID"))
 CRYPTOBOT_API_TOKEN: Optional[str] = os.environ.get("CRYPTOBOT_API_TOKEN")
 PANEL_URL: Optional[str] = os.environ.get("PANEL_URL")

@@ -175,6 +175,74 @@ def _sum_subscription_end_dates(
     return now_n + total
 
 
+def _max_subscription_end_dates(
+    a: Optional[datetime], b: Optional[datetime], now: datetime
+) -> Optional[datetime]:
+    """Более поздняя дата окончания (для merge без двух оплат по одному треку)."""
+    if a is None and b is None:
+        return None
+
+    def norm(dt: datetime) -> datetime:
+        if dt.tzinfo is None:
+            return _naive_utc(dt)
+        return _naive_utc(dt.astimezone(timezone.utc).replace(tzinfo=None))
+
+    vals: List[datetime] = []
+    if a is not None:
+        vals.append(norm(a))
+    if b is not None:
+        vals.append(norm(b))
+    return max(vals)
+
+
+def _payload_white_flag(payload: Optional[str]) -> bool:
+    """True — mobile/white трек; без ключа white в payload считаем обычной подпиской."""
+    if not payload or not str(payload).strip():
+        return False
+    try:
+        parts = dict(item.split(":", 1) for item in str(payload).split(","))
+    except ValueError:
+        return False
+    return parts.get("white", "False") == "True"
+
+
+_MERGE_PAYMENT_MODELS = (
+    Payments,
+    PaymentsCards,
+    PaymentsPlategaCrypto,
+    PaymentsWataSBP,
+    PaymentsWataCard,
+    PaymentsStars,
+    PaymentsCryptobot,
+)
+
+
+async def _merge_user_paid_subscription_flags(session, user_id: int) -> Tuple[bool, bool]:
+    """
+    (оплаченный pro-трек, оплаченный white-трек): успешный не-подарочный платёж
+    с white=False / white=True в payload (аналогично для обеих сторон merge).
+    """
+    has_pro = False
+    has_white = False
+    for model in _MERGE_PAYMENT_MODELS:
+        if has_pro and has_white:
+            break
+        stmt = select(model.payload).where(
+            model.user_id == user_id,
+            model.is_gift.is_(False),
+            model.status.in_(_BILLING_OK_STATUSES),
+        )
+        result = await session.execute(stmt)
+        for (payload,) in result.all():
+            if _payload_white_flag(payload):
+                has_white = True
+            else:
+                has_pro = True
+            if has_pro and has_white:
+                break
+    return has_pro, has_white
+
+
 class AsyncSQL:
     def __init__(self):
         self.session_factory = AsyncSessionLocal
@@ -349,12 +417,26 @@ class AsyncSQL:
             e.password_hash = None
             await session.flush()
 
-            t.subscription_end_date = _sum_subscription_end_dates(
-                t.subscription_end_date, e.subscription_end_date, merge_now
-            )
-            t.white_subscription_end_date = _sum_subscription_end_dates(
-                t.white_subscription_end_date, e.white_subscription_end_date, merge_now
-            )
+            t_paid_pro, t_paid_white = await _merge_user_paid_subscription_flags(session, t.user_id)
+            e_paid_pro, e_paid_white = await _merge_user_paid_subscription_flags(session, e.user_id)
+
+            if t_paid_pro and e_paid_pro:
+                t.subscription_end_date = _sum_subscription_end_dates(
+                    t.subscription_end_date, e.subscription_end_date, merge_now
+                )
+            else:
+                t.subscription_end_date = _max_subscription_end_dates(
+                    t.subscription_end_date, e.subscription_end_date, merge_now
+                )
+
+            if t_paid_white and e_paid_white:
+                t.white_subscription_end_date = _sum_subscription_end_dates(
+                    t.white_subscription_end_date, e.white_subscription_end_date, merge_now
+                )
+            else:
+                t.white_subscription_end_date = _max_subscription_end_dates(
+                    t.white_subscription_end_date, e.white_subscription_end_date, merge_now
+                )
             t.in_panel = bool(t.in_panel or e.in_panel)
             t.in_chanel = bool(t.in_chanel or e.in_chanel)
             t.is_connect = bool(t.is_connect or e.is_connect)

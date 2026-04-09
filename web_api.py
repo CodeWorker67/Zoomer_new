@@ -25,18 +25,18 @@ from config import (
     ADMIN_IDS,
     BOT_URL,
     JWT_SECRET,
-    PLATEGA_API_KEY,
-    PLATEGA_MERCHANT_ID,
     SMTP_FROM,
     SMTP_HOST,
     SMTP_PASSWORD,
     SMTP_PORT,
     SMTP_USER,
     TG_TOKEN,
+    WATA_API_CARD_KEY,
+    WATA_API_SBP_KEY,
 )
 from lexicon import dct_desc, dct_price, lexicon
 from logging_config import logger
-from payments.pay_platega import PlategaPayment
+from payments.pay_wata import pay_site
 
 app = FastAPI(title="Zoomer Web API")
 
@@ -256,7 +256,7 @@ class TelegramAuthIn(BaseModel):
 
 class CreatePaymentIn(BaseModel):
     tariff_id: str
-    method: Literal["sbp", "card", "crypto"]
+    method: Literal["sbp", "card"]
     is_gift: bool = False
 
 
@@ -505,48 +505,28 @@ async def payments_create(ctx: JwtCtx, body: CreatePaymentIn):
     if billing_user_id in ADMIN_IDS:
         price = 1
 
-    method = body.method
-    if method == "sbp":
-        payment_method = 2
-        method_label = "sbp"
-    elif method == "card":
-        payment_method = 11
-        method_label = "card"
-    else:
-        payment_method = 13
-        method_label = "crypto"
+    if body.method == "sbp" and not WATA_API_SBP_KEY:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "WATA SBP is not configured")
+    if body.method == "card" and not WATA_API_CARD_KEY:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "WATA card is not configured")
 
-    payload = (
-        f"user_id:{payload_user},duration:{duration_str},white:{white},"
-        f"gift:{body.is_gift},method:{method_label},amount:{int(price)}"
-    )
     description = (
         f"Подписка в подарок {dct_desc[desc_key]}" if body.is_gift else dct_desc[desc_key]
     )
 
-    if not PLATEGA_API_KEY or not PLATEGA_MERCHANT_ID:
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Platega is not configured")
-
-    platega = PlategaPayment(PLATEGA_API_KEY, PLATEGA_MERCHANT_ID)
-    result = await platega.create_payment(
-        amount=float(price),
-        description=description,
-        payment_method=payment_method,
-        payload=payload,
+    result = await pay_site(
+        val=str(price),
+        des=description,
+        payload_user=payload_user,
+        billing_user_id=billing_user_id,
+        duration=duration_str,
+        white=white,
+        is_gift=body.is_gift,
+        kind=body.method,
     )
 
-    if method == "sbp":
-        await sql.add_platega_payment(
-            billing_user_id, int(price), result["status"], result["id"], payload, is_gift=body.is_gift
-        )
-    elif method == "card":
-        await sql.add_platega_card_payment(
-            billing_user_id, int(price), result["status"], result["id"], payload, is_gift=body.is_gift
-        )
-    else:
-        await sql.add_platega_crypto_payment(
-            billing_user_id, int(price), result["status"], result["id"], payload, is_gift=body.is_gift
-        )
+    if result["status"] != "pending":
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Не удалось создать платёж")
 
     return {
         "payment_url": result.get("url") or "",

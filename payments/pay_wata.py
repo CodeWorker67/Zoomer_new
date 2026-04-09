@@ -207,6 +207,62 @@ async def pay_for_gift(
         return {"status": "error", "url": "", "id": ""}
 
 
+async def pay_site(
+    val: str,
+    des: str,
+    payload_user: str,
+    billing_user_id: int,
+    duration: str,
+    white: bool,
+    is_gift: bool,
+    kind: WataKind,
+) -> Dict[str, Any]:
+    """Оплата с сайта (web API): payload с user_id/email, method wata_sbp/wata_card, source:site."""
+    token = WATA_API_SBP_KEY if kind == "sbp" else WATA_API_CARD_KEY
+    if not token:
+        logger.error("WATA site: отсутствует токен для {}", kind)
+        return {"status": "error", "url": "", "id": ""}
+
+    method = "wata_sbp" if kind == "sbp" else "wata_card"
+    gift_str = "True" if is_gift else "False"
+    payload = (
+        f"user_id:{payload_user},duration:{duration},white:{white},gift:{gift_str},"
+        f"method:{method},amount:{int(val)},source:site"
+    )
+    order_id = f"{method}-site-{uuid.uuid4().hex}"
+    amount_api = _wata_amount_rub(val)
+
+    client = WataPayment(token)
+    try:
+        result = await client.create_payment_link(
+            amount=amount_api,
+            currency="RUB",
+            description=des,
+            order_id=order_id,
+            success_redirect_url=BOT_URL,
+            fail_redirect_url=BOT_URL,
+        )
+        pay_url = result.get("url") or result.get("Url") or ""
+        if not pay_url:
+            logger.error("WATA site: пустая ссылка в ответе {}", result)
+            return {"status": "error", "url": "", "id": ""}
+
+        if kind == "sbp":
+            await sql.add_wata_sbp_payment(
+                billing_user_id, int(val), "pending", order_id, payload, is_gift=is_gift
+            )
+        else:
+            await sql.add_wata_card_payment(
+                billing_user_id, int(val), "pending", order_id, payload, is_gift=is_gift
+            )
+
+        logger.info("WATA site {}: ссылка создана orderId={}", method, order_id)
+        return {"status": "pending", "url": pay_url, "id": order_id}
+    except Exception as e:
+        logger.error("WATA site create payment: {}", e)
+        return {"status": "error", "url": "", "id": ""}
+
+
 def _duration_from_wata_callback(data: str, prefix: str, gift_prefix: str) -> tuple[str, bool]:
     gift_flag = False
     if data.startswith(gift_prefix):

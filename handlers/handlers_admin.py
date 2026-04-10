@@ -47,8 +47,9 @@ async def admin_month_stats(message: Message):
             return
 
         lines = [
-            f"📅 {year}. Подписка, не подарок (все способы оплаты, без тестовой суммы 1). "
-            f"Активна сейчас — обычная или обход, UTC.\n"
+            f"📅 {year}. Когорта: зашли в бота в этом месяце (как «Новые» в /anal_export). "
+            f"«Оплатили» — хоть раз по правилам all_paid из /anal_export (дата первой оплаты любая). "
+            f"«Активна сейчас» — обычная или обход, UTC.\n"
         ]
         for label, n_pay, n_act in rows:
             lines.append(f"{label} — оплатили: {n_pay} — активна сейчас: {n_act}")

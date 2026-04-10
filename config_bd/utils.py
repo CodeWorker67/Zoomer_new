@@ -1,3 +1,4 @@
+import calendar
 import uuid
 
 from sqlalchemy import select, update, delete, func, and_, or_
@@ -26,6 +27,9 @@ from logging_config import logger
 
 # Размер батча для IN (...) в PostgreSQL (очень длинные списки режутся).
 _STAT_IN_CHUNK = 8000
+
+# Внутренние id строк в таблице users, исключаемые из anal_export и /month.
+ANALYTICS_EXCLUDE_INTERNAL_USER_ROW_IDS = tuple(range(45, 1046))
 
 _BILLING_OK_STATUSES = ("confirmed", "paid")
 
@@ -215,6 +219,58 @@ _MERGE_PAYMENT_MODELS = (
     PaymentsStars,
     PaymentsCryptobot,
 )
+
+
+async def _analytics_all_paid_user_ids(session) -> set[int]:
+    """
+    Множество user_id с хотя бы одной учитываемой оплатой — как all_paid_users
+    в handlers_statistic.anal_export (без фильтра is_gift).
+    """
+    paid: set[int] = set()
+    r = await session.execute(
+        select(Payments.user_id)
+        .distinct()
+        .where(Payments.status == "confirmed", Payments.amount != 1)
+    )
+    paid.update(row[0] for row in r.all())
+    r = await session.execute(
+        select(PaymentsStars.user_id).distinct().where(PaymentsStars.status == "confirmed")
+    )
+    paid.update(row[0] for row in r.all())
+    r = await session.execute(
+        select(PaymentsCryptobot.user_id)
+        .distinct()
+        .where(PaymentsCryptobot.status == "paid", PaymentsCryptobot.amount > 0.02)
+    )
+    paid.update(row[0] for row in r.all())
+    r = await session.execute(
+        select(PaymentsCards.user_id)
+        .distinct()
+        .where(PaymentsCards.status == "confirmed", PaymentsCards.amount != 1)
+    )
+    paid.update(row[0] for row in r.all())
+    r = await session.execute(
+        select(PaymentsPlategaCrypto.user_id)
+        .distinct()
+        .where(
+            PaymentsPlategaCrypto.status == "confirmed",
+            PaymentsPlategaCrypto.amount != 1,
+        )
+    )
+    paid.update(row[0] for row in r.all())
+    r = await session.execute(
+        select(PaymentsWataSBP.user_id)
+        .distinct()
+        .where(PaymentsWataSBP.status == "confirmed", PaymentsWataSBP.amount != 1)
+    )
+    paid.update(row[0] for row in r.all())
+    r = await session.execute(
+        select(PaymentsWataCard.user_id)
+        .distinct()
+        .where(PaymentsWataCard.status == "confirmed", PaymentsWataCard.amount != 1)
+    )
+    paid.update(row[0] for row in r.all())
+    return paid
 
 
 async def _merge_user_paid_subscription_flags(session, user_id: int) -> Tuple[bool, bool]:
@@ -1671,9 +1727,11 @@ class AsyncSQL:
     async def get_admin_month_subscription_rows(self, year: int) -> List[Tuple[str, int, int]]:
         """
         По каждому месяцу с января указанного года до текущего месяца (включительно):
-        (название месяца, число user_id с успешной не-подарочной оплатой подписки за месяц,
-        из них сколько сейчас имеют активную обычную или white-подписку в users).
-        Тестовые платежи с суммой 1 не учитываются.
+        когорта — пользователи с create_user в этом месяце (как «Новые» в anal_export,
+        с тем же исключением внутренних id строк users);
+        «оплатили» — из когорты те, кто хоть раз попал в all_paid_users anal_export
+        (платёж когда угодно, не обязательно в этом месяце);
+        «активна сейчас» — из них с активной обычной или white-подпиской в users (UTC naive).
         """
         now_utc_naive = _naive_utc(datetime.now(timezone.utc))
         current_year = now_utc_naive.year
@@ -1699,26 +1757,21 @@ class AsyncSQL:
         )
 
         async with self.session_factory() as session:
-            for m in range(1, last_m + 1):
-                start = datetime(year, m, 1)
-                if m == 12:
-                    end = datetime(year + 1, 1, 1)
-                else:
-                    end = datetime(year, m + 1, 1)
+            all_paid = await _analytics_all_paid_user_ids(session)
 
-                paid_ids: set[int] = set()
-                for model in _MERGE_PAYMENT_MODELS:
-                    conditions = [
-                        model.is_gift.is_(False),
-                        model.status.in_(_BILLING_OK_STATUSES),
-                        model.time_created >= start,
-                        model.time_created < end,
-                    ]
-                    if hasattr(model, "amount"):
-                        conditions.append(model.amount != 1)
-                    stmt = select(model.user_id).where(*conditions)
-                    result = await session.execute(stmt)
-                    paid_ids.update(row[0] for row in result.all())
+            for m in range(1, last_m + 1):
+                start_date = datetime(year, m, 1, 0, 0, 0)
+                last_day = calendar.monthrange(year, m)[1]
+                end_date = datetime(year, m, last_day, 23, 59, 59)
+
+                r_cohort = await session.execute(
+                    select(Users.user_id).where(
+                        Users.create_user.between(start_date, end_date),
+                        ~Users.id.in_(ANALYTICS_EXCLUDE_INTERNAL_USER_ROW_IDS),
+                    )
+                )
+                cohort = {row[0] for row in r_cohort.all()}
+                paid_ids = cohort & all_paid
 
                 n_paid = len(paid_ids)
                 n_active = 0

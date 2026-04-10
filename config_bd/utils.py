@@ -1,5 +1,6 @@
 import calendar
 import uuid
+from collections import defaultdict
 
 from sqlalchemy import select, update, delete, func, and_, or_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -271,6 +272,82 @@ async def _analytics_all_paid_user_ids(session) -> set[int]:
     )
     paid.update(row[0] for row in r.all())
     return paid
+
+
+async def _non_gift_payment_row_counts(session, user_ids: List[int]) -> dict[int, int]:
+    """
+    Число строк успешных платежей на пользователя (is_gift=False), по тем же порогам сумм/статусов,
+    что и all_paid в anal_export. Суммируется по всем таблицам (несколько каналов = несколько оплат).
+    """
+    if not user_ids:
+        return {}
+    totals: dict[int, int] = defaultdict(int)
+    for i in range(0, len(user_ids), _STAT_IN_CHUNK):
+        chunk = user_ids[i : i + _STAT_IN_CHUNK]
+        pairs = [
+            (
+                Payments,
+                (
+                    Payments.is_gift.is_(False),
+                    Payments.status == "confirmed",
+                    Payments.amount != 1,
+                ),
+            ),
+            (
+                PaymentsStars,
+                (PaymentsStars.is_gift.is_(False), PaymentsStars.status == "confirmed"),
+            ),
+            (
+                PaymentsCryptobot,
+                (
+                    PaymentsCryptobot.is_gift.is_(False),
+                    PaymentsCryptobot.status == "paid",
+                    PaymentsCryptobot.amount > 0.02,
+                ),
+            ),
+            (
+                PaymentsCards,
+                (
+                    PaymentsCards.is_gift.is_(False),
+                    PaymentsCards.status == "confirmed",
+                    PaymentsCards.amount != 1,
+                ),
+            ),
+            (
+                PaymentsPlategaCrypto,
+                (
+                    PaymentsPlategaCrypto.is_gift.is_(False),
+                    PaymentsPlategaCrypto.status == "confirmed",
+                    PaymentsPlategaCrypto.amount != 1,
+                ),
+            ),
+            (
+                PaymentsWataSBP,
+                (
+                    PaymentsWataSBP.is_gift.is_(False),
+                    PaymentsWataSBP.status == "confirmed",
+                    PaymentsWataSBP.amount != 1,
+                ),
+            ),
+            (
+                PaymentsWataCard,
+                (
+                    PaymentsWataCard.is_gift.is_(False),
+                    PaymentsWataCard.status == "confirmed",
+                    PaymentsWataCard.amount != 1,
+                ),
+            ),
+        ]
+        for model, extra_where in pairs:
+            stmt = (
+                select(model.user_id, func.count())
+                .where(model.user_id.in_(chunk), *extra_where)
+                .group_by(model.user_id)
+            )
+            r = await session.execute(stmt)
+            for uid, c in r.all():
+                totals[uid] += int(c)
+    return dict(totals)
 
 
 async def _merge_user_paid_subscription_flags(session, user_id: int) -> Tuple[bool, bool]:
@@ -1724,14 +1801,16 @@ class AsyncSQL:
             result = await session.execute(stmt)
             return [row[0] for row in result.all()]
 
-    async def get_admin_month_subscription_rows(self, year: int) -> List[Tuple[str, int, int]]:
+    async def get_admin_month_subscription_rows(self, year: int) -> List[Tuple[str, int, int, int]]:
         """
         По каждому месяцу с января указанного года до текущего месяца (включительно):
         когорта — пользователи с create_user в этом месяце (как «Новые» в anal_export,
         с тем же исключением внутренних id строк users);
         «оплатили» — из когорты те, кто хоть раз попал в all_paid_users anal_export
         (платёж когда угодно, не обязательно в этом месяце);
-        «активна сейчас» — из них с активной обычной или white-подпиской в users (UTC naive).
+        «активна сейчас» — из них с активной обычной или white-подпиской в users (UTC naive);
+        «рецидивисты» — из числа «активна сейчас» те, у кого ≥2 успешных не-подарочных платежа
+        (строки в таблицах платежей, те же пороги, что у all_paid + is_gift=False).
         """
         now_utc_naive = _naive_utc(datetime.now(timezone.utc))
         current_year = now_utc_naive.year
@@ -1740,7 +1819,7 @@ class AsyncSQL:
             return []
 
         last_m = current_month if year == current_year else 12
-        rows: List[Tuple[str, int, int]] = []
+        rows: List[Tuple[str, int, int, int]] = []
         month_names = (
             "Январь",
             "Февраль",
@@ -1774,31 +1853,34 @@ class AsyncSQL:
                 paid_ids = cohort & all_paid
 
                 n_paid = len(paid_ids)
-                n_active = 0
+                active_uids: List[int] = []
                 if paid_ids:
                     uids = list(paid_ids)
                     for i in range(0, len(uids), _STAT_IN_CHUNK):
                         chunk = uids[i : i + _STAT_IN_CHUNK]
-                        stmt_active = (
-                            select(func.count())
-                            .select_from(Users)
-                            .where(
-                                Users.user_id.in_(chunk),
-                                or_(
-                                    and_(
-                                        Users.subscription_end_date.isnot(None),
-                                        Users.subscription_end_date > now_utc_naive,
-                                    ),
-                                    and_(
-                                        Users.white_subscription_end_date.isnot(None),
-                                        Users.white_subscription_end_date > now_utc_naive,
-                                    ),
+                        stmt_active = select(Users.user_id).where(
+                            Users.user_id.in_(chunk),
+                            or_(
+                                and_(
+                                    Users.subscription_end_date.isnot(None),
+                                    Users.subscription_end_date > now_utc_naive,
                                 ),
-                            )
+                                and_(
+                                    Users.white_subscription_end_date.isnot(None),
+                                    Users.white_subscription_end_date > now_utc_naive,
+                                ),
+                            ),
                         )
-                        n_active += (await session.execute(stmt_active)).scalar_one()
+                        r_act = await session.execute(stmt_active)
+                        active_uids.extend(row[0] for row in r_act.all())
 
-                rows.append((f"{month_names[m - 1]} {year}", n_paid, n_active))
+                n_active = len(active_uids)
+                n_recid = 0
+                if active_uids:
+                    pay_counts = await _non_gift_payment_row_counts(session, active_uids)
+                    n_recid = sum(1 for uid in active_uids if pay_counts.get(uid, 0) >= 2)
+
+                rows.append((f"{month_names[m - 1]} {year}", n_paid, n_active, n_recid))
 
         return rows
 

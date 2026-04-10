@@ -31,7 +31,7 @@ async def get_photo(message: Message):
 
 @router.message(Command(commands=['month']))
 async def admin_month_stats(message: Message):
-    """Статистика по месяцам: оплатившие подписку (не подарок) и сколько из них с активной подпиской сейчас."""
+    """Помесячная когорта (как anal_export): оплаты, активные сейчас, рецидивисты среди активных."""
     if message.from_user.id not in ADMIN_IDS:
         return
 
@@ -49,10 +49,13 @@ async def admin_month_stats(message: Message):
         lines = [
             f"📅 {year}. Когорта: зашли в бота в этом месяце (как «Новые» в /anal_export). "
             f"«Оплатили» — хоть раз по правилам all_paid из /anal_export (дата первой оплаты любая). "
-            f"«Активна сейчас» — обычная или обход, UTC.\n"
+            f"«Активна сейчас» — обычная или обход, UTC. "
+            f"«Рецидивисты» — из «активна сейчас»: ≥2 успешных оплат с is_gift=false (те же суммы/статусы, что all_paid).\n"
         ]
-        for label, n_pay, n_act in rows:
-            lines.append(f"{label} — оплатили: {n_pay} — активна сейчас: {n_act}")
+        for label, n_pay, n_act, n_rec in rows:
+            lines.append(
+                f"{label} — оплатили: {n_pay} — активна: {n_act} — рецидивисты: {n_rec}"
+            )
 
         text = "\n".join(lines)
         if len(text) <= 4000:

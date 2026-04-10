@@ -2,7 +2,7 @@ from datetime import datetime
 
 from bot import bot, sql
 from config import CHECKER_ID
-from keyboard import create_kb
+from keyboard import create_kb, STYLE_PRIMARY, STYLE_SUCCESS
 from telegram_ids import is_telegram_chat_id
 from lexicon import lexicon
 from logging_config import logger
@@ -56,19 +56,32 @@ async def send_push_cron(debug: bool = False):
 
                     if message_text:
                         try:
-                            keyboard_broadcast = create_kb(1, free_vpn='🔥 Попробовать бесплатно')
+                            keyboard_broadcast_mes = create_kb(
+                                1,
+                                styles={
+                                    'free_vpn': STYLE_SUCCESS,
+                                    'video_faq': STYLE_PRIMARY,
+                                },
+                                free_vpn='🔥 Попробовать бесплатно',
+                                video_faq='🎥 Видеоинструкция',
+                            )
+                            keyboard_broadcast_video = create_kb(
+                                1,
+                                styles={'free_vpn': STYLE_SUCCESS},
+                                free_vpn='🔥 Попробовать бесплатно',
+                            )
                             if video_flag:
                                 await bot.send_video(
                                     chat_id=user_id,
                                     video='BAACAgIAAxkBAAEBk_5pmqIm8a5-5ioQ3GziIJ4dBH9PugAC_ZgAAtS92EjbvWnuAla0dDoE',
                                     caption=message_text,
-                                    reply_markup=keyboard_broadcast
+                                    reply_markup=keyboard_broadcast_video,
                                 )
                             else:
                                 await bot.send_message(
                                     chat_id=user_id,
                                     text=message_text,
-                                    reply_markup=keyboard_broadcast
+                                    reply_markup=keyboard_broadcast_mes,
                                 )
                             sent_count_not_sub += 1
                             logger.info(f"Отправлено push-уведомление пользователю {user_id}")
@@ -88,19 +101,32 @@ async def send_push_cron(debug: bool = False):
 
                     if message_text:
                         try:
-                            keyboard_broadcast = create_kb(1, connect_vpn='🔗 Подключить VPN')
+                            keyboard_broadcast_mes = create_kb(
+                                1,
+                                styles={
+                                    'connect_vpn': STYLE_PRIMARY,
+                                    'video_faq': STYLE_PRIMARY,
+                                },
+                                connect_vpn='🔗 Подключить VPN',
+                                video_faq='🎥 Видеоинструкция',
+                            )
+                            keyboard_broadcast_video = create_kb(
+                                1,
+                                styles={'connect_vpn': STYLE_PRIMARY},
+                                connect_vpn='🔗 Подключить VPN',
+                            )
                             if video_flag:
                                 await bot.send_video(
                                     chat_id=user_id,
                                     video='BAACAgIAAxkBAAEBk_5pmqIm8a5-5ioQ3GziIJ4dBH9PugAC_ZgAAtS92EjbvWnuAla0dDoE',
                                     caption=message_text,
-                                    reply_markup=keyboard_broadcast
+                                    reply_markup=keyboard_broadcast_video,
                                 )
                             else:
                                 await bot.send_message(
                                     chat_id=user_id,
                                     text=message_text,
-                                    reply_markup=keyboard_broadcast
+                                    reply_markup=keyboard_broadcast_mes,
                                 )
                             sent_count_not_connect += 1
                             logger.info(f"Отправлено push-уведомление пользователю {user_id}")

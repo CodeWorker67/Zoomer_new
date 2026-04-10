@@ -26,6 +26,31 @@ from config_bd.models import (
 from lexicon import dct_price
 from logging_config import logger
 
+
+def _analytics_stars_to_rub(amount: int) -> Optional[int]:
+    """Как convert_stars_to_rub в handlers_statistic (без импорта хендлера из utils)."""
+    mapping = {
+        66: 99,
+        179: 269,
+        199: 299,
+        333: 499,
+        99: 99,
+        269: 269,
+        299: 299,
+        499: 499,
+    }
+    return mapping.get(amount)
+
+
+def _analytics_crypto_to_rub(currency: str, amount: str) -> Optional[int]:
+    """Как convert_crypto_to_rub в handlers_statistic."""
+    mapping = {
+        "TON": {"0.9": 99, "2.5": 269, "2.8": 299, "4.6": 499},
+        "USDT": {"1.3": 99, "3.5": 269, "4.0": 299, "6.5": 499},
+    }
+    return mapping.get(currency, {}).get(amount)
+
+
 # Размер батча для IN (...) в PostgreSQL (очень длинные списки режутся).
 _STAT_IN_CHUNK = 8000
 
@@ -348,6 +373,89 @@ async def _non_gift_payment_row_counts(session, user_ids: List[int]) -> dict[int
             for uid, c in r.all():
                 totals[uid] += int(c)
     return dict(totals)
+
+
+async def _cohort_lifetime_revenue_rub(session, cohort: set[int]) -> int:
+    """
+    Сумма в рублях по всем успешным платежам пользователей когорты за всё время:
+    подарки и подписки, те же фильтры/конвертации, что блок all_payments в anal_export
+    (без привязки к месяцу платежа).
+    """
+    if not cohort:
+        return 0
+    total = 0
+    ids_list = list(cohort)
+    for i in range(0, len(ids_list), _STAT_IN_CHUNK):
+        chunk = ids_list[i : i + _STAT_IN_CHUNK]
+        r = await session.execute(
+            select(Payments.amount).where(
+                Payments.user_id.in_(chunk),
+                Payments.status == "confirmed",
+                Payments.amount != 1,
+            )
+        )
+        total += sum(row[0] for row in r.all())
+
+        r = await session.execute(
+            select(PaymentsStars.amount).where(
+                PaymentsStars.user_id.in_(chunk),
+                PaymentsStars.status == "confirmed",
+            )
+        )
+        for (amt,) in r.all():
+            rub = _analytics_stars_to_rub(amt)
+            if rub is not None:
+                total += rub
+
+        r = await session.execute(
+            select(PaymentsCryptobot.amount, PaymentsCryptobot.currency).where(
+                PaymentsCryptobot.user_id.in_(chunk),
+                PaymentsCryptobot.status == "paid",
+                PaymentsCryptobot.amount > 0.02,
+            )
+        )
+        for amt, cur in r.all():
+            rub = _analytics_crypto_to_rub(cur, str(amt))
+            if rub is not None:
+                total += rub
+
+        r = await session.execute(
+            select(PaymentsCards.amount).where(
+                PaymentsCards.user_id.in_(chunk),
+                PaymentsCards.status == "confirmed",
+                PaymentsCards.amount != 0,
+            )
+        )
+        total += sum(row[0] for row in r.all())
+
+        r = await session.execute(
+            select(PaymentsPlategaCrypto.amount).where(
+                PaymentsPlategaCrypto.user_id.in_(chunk),
+                PaymentsPlategaCrypto.status == "confirmed",
+                PaymentsPlategaCrypto.amount != 1,
+            )
+        )
+        total += sum(row[0] for row in r.all())
+
+        r = await session.execute(
+            select(PaymentsWataSBP.amount).where(
+                PaymentsWataSBP.user_id.in_(chunk),
+                PaymentsWataSBP.status == "confirmed",
+                PaymentsWataSBP.amount != 1,
+            )
+        )
+        total += sum(row[0] for row in r.all())
+
+        r = await session.execute(
+            select(PaymentsWataCard.amount).where(
+                PaymentsWataCard.user_id.in_(chunk),
+                PaymentsWataCard.status == "confirmed",
+                PaymentsWataCard.amount != 1,
+            )
+        )
+        total += sum(row[0] for row in r.all())
+
+    return int(total)
 
 
 async def _merge_user_paid_subscription_flags(session, user_id: int) -> Tuple[bool, bool]:
@@ -1801,7 +1909,7 @@ class AsyncSQL:
             result = await session.execute(stmt)
             return [row[0] for row in result.all()]
 
-    async def get_admin_month_subscription_rows(self, year: int) -> List[Tuple[str, int, int, int]]:
+    async def get_admin_month_subscription_rows(self, year: int) -> List[Tuple[str, int, int, int, int]]:
         """
         По каждому месяцу с января указанного года до текущего месяца (включительно):
         когорта — пользователи с create_user в этом месяце (как «Новые» в anal_export,
@@ -1810,7 +1918,9 @@ class AsyncSQL:
         (платёж когда угодно, не обязательно в этом месяце);
         «активна сейчас» — из них с активной обычной или white-подпиской в users (UTC naive);
         «рецидивисты» — из числа «активна сейчас» те, у кого ≥2 успешных не-подарочных платежа
-        (строки в таблицах платежей, те же пороги, что у all_paid + is_gift=False).
+        (строки в таблицах платежей, те же пороги, что у all_paid + is_gift=False);
+        «выручка» — сумма в рублях по всей когорте (все успешные платежи за всё время: подарки+подписки),
+        конвертация Stars/Crypto как в anal_export.
         """
         now_utc_naive = _naive_utc(datetime.now(timezone.utc))
         current_year = now_utc_naive.year
@@ -1819,7 +1929,7 @@ class AsyncSQL:
             return []
 
         last_m = current_month if year == current_year else 12
-        rows: List[Tuple[str, int, int, int]] = []
+        rows: List[Tuple[str, int, int, int, int]] = []
         month_names = (
             "Январь",
             "Февраль",
@@ -1880,7 +1990,11 @@ class AsyncSQL:
                     pay_counts = await _non_gift_payment_row_counts(session, active_uids)
                     n_recid = sum(1 for uid in active_uids if pay_counts.get(uid, 0) >= 2)
 
-                rows.append((f"{month_names[m - 1]} {year}", n_paid, n_active, n_recid))
+                revenue_rub = await _cohort_lifetime_revenue_rub(session, cohort)
+
+                rows.append(
+                    (f"{month_names[m - 1]} {year}", n_paid, n_active, n_recid, revenue_rub)
+                )
 
         return rows
 

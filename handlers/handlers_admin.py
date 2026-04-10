@@ -50,11 +50,13 @@ async def admin_month_stats(message: Message):
             f"📅 {year}. Когорта: зашли в бота в этом месяце (как «Новые» в /anal_export). "
             f"«Оплатили» — хоть раз по правилам all_paid из /anal_export (дата первой оплаты любая). "
             f"«Активна сейчас» — обычная или обход, UTC. "
-            f"«Рецидивисты» — из «активна сейчас»: ≥2 успешных оплат с is_gift=false (те же суммы/статусы, что all_paid).\n"
+            f"«Рецидивисты» — из «активна сейчас»: ≥2 успешных оплат с is_gift=false (те же суммы/статусы, что all_paid). "
+            f"«Выручка» — по всей когорте месяца, все успешные платежи за всё время (подарки+подписки), ₽ как в /anal_export.\n"
         ]
-        for label, n_pay, n_act, n_rec in rows:
+        for label, n_pay, n_act, n_rec, rev in rows:
+            rev_s = f"{rev:,}".replace(",", " ")
             lines.append(
-                f"{label} — оплатили: {n_pay} — активна: {n_act} — рецидивисты: {n_rec}"
+                f"{label} — оплатили: {n_pay} — активна: {n_act} — рецидивисты: {n_rec} — выручка: {rev_s} ₽"
             )
 
         text = "\n".join(lines)

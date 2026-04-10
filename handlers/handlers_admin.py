@@ -29,6 +29,51 @@ async def get_photo(message: Message):
     await message.answer(message.photo[-1].file_id)
 
 
+@router.message(Command(commands=['month']))
+async def admin_month_stats(message: Message):
+    """Статистика по месяцам: оплатившие подписку (не подарок) и сколько из них с активной подпиской сейчас."""
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    try:
+        year = datetime.now(timezone.utc).year
+        args = (message.text or "").split()
+        if len(args) >= 2:
+            year = int(args[1].strip())
+
+        rows = await sql.get_admin_month_subscription_rows(year)
+        if not rows:
+            await message.answer(f"Нет данных для года {year} (год в будущем или некорректен).")
+            return
+
+        lines = [
+            f"📅 {year}. Подписка, не подарок (все способы оплаты, без тестовой суммы 1). "
+            f"Активна сейчас — обычная или обход, UTC.\n"
+        ]
+        for label, n_pay, n_act in rows:
+            lines.append(f"{label} — оплатили: {n_pay} — активна сейчас: {n_act}")
+
+        text = "\n".join(lines)
+        if len(text) <= 4000:
+            await message.answer(text)
+        else:
+            # Разбиваем на части по ~3500 символов, чтобы уложиться в лимит Telegram
+            chunk: list[str] = []
+            pos = 0
+            while pos < len(text):
+                chunk.append(text[pos : pos + 3500])
+                pos += 3500
+            for i, part in enumerate(chunk):
+                await message.answer(part if i == 0 else f"(продолжение)\n{part}")
+                await asyncio.sleep(0.35)
+
+    except ValueError:
+        await message.answer("❌ Год укажите числом, например: /month 2025")
+    except Exception as e:
+        logger.exception("Ошибка в /month")
+        await message.answer(f"❌ Ошибка: {str(e)}")
+
+
 @router.message(Command(commands=['user']))
 async def user_info(message: Message):
 

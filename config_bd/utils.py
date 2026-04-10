@@ -1668,4 +1668,85 @@ class AsyncSQL:
             result = await session.execute(stmt)
             return [row[0] for row in result.all()]
 
+    async def get_admin_month_subscription_rows(self, year: int) -> List[Tuple[str, int, int]]:
+        """
+        По каждому месяцу с января указанного года до текущего месяца (включительно):
+        (название месяца, число user_id с успешной не-подарочной оплатой подписки за месяц,
+        из них сколько сейчас имеют активную обычную или white-подписку в users).
+        Тестовые платежи с суммой 1 не учитываются.
+        """
+        now_utc_naive = _naive_utc(datetime.now(timezone.utc))
+        current_year = now_utc_naive.year
+        current_month = now_utc_naive.month
+        if year > current_year:
+            return []
+
+        last_m = current_month if year == current_year else 12
+        rows: List[Tuple[str, int, int]] = []
+        month_names = (
+            "Январь",
+            "Февраль",
+            "Март",
+            "Апрель",
+            "Май",
+            "Июнь",
+            "Июль",
+            "Август",
+            "Сентябрь",
+            "Октябрь",
+            "Ноябрь",
+            "Декабрь",
+        )
+
+        async with self.session_factory() as session:
+            for m in range(1, last_m + 1):
+                start = datetime(year, m, 1)
+                if m == 12:
+                    end = datetime(year + 1, 1, 1)
+                else:
+                    end = datetime(year, m + 1, 1)
+
+                paid_ids: set[int] = set()
+                for model in _MERGE_PAYMENT_MODELS:
+                    conditions = [
+                        model.is_gift.is_(False),
+                        model.status.in_(_BILLING_OK_STATUSES),
+                        model.time_created >= start,
+                        model.time_created < end,
+                    ]
+                    if hasattr(model, "amount"):
+                        conditions.append(model.amount != 1)
+                    stmt = select(model.user_id).where(*conditions)
+                    result = await session.execute(stmt)
+                    paid_ids.update(row[0] for row in result.all())
+
+                n_paid = len(paid_ids)
+                n_active = 0
+                if paid_ids:
+                    uids = list(paid_ids)
+                    for i in range(0, len(uids), _STAT_IN_CHUNK):
+                        chunk = uids[i : i + _STAT_IN_CHUNK]
+                        stmt_active = (
+                            select(func.count())
+                            .select_from(Users)
+                            .where(
+                                Users.user_id.in_(chunk),
+                                or_(
+                                    and_(
+                                        Users.subscription_end_date.isnot(None),
+                                        Users.subscription_end_date > now_utc_naive,
+                                    ),
+                                    and_(
+                                        Users.white_subscription_end_date.isnot(None),
+                                        Users.white_subscription_end_date > now_utc_naive,
+                                    ),
+                                ),
+                            )
+                        )
+                        n_active += (await session.execute(stmt_active)).scalar_one()
+
+                rows.append((f"{month_names[m - 1]} {year}", n_paid, n_active))
+
+        return rows
+
 

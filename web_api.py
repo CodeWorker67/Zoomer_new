@@ -106,6 +106,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
+    expose_headers=["X-Auth-Token"],
 )
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -180,26 +181,58 @@ def _tariff_parts(tariff_id: str) -> tuple[str, str, bool]:
     return desc_key, d, white
 
 
-def _set_auth_cookie(response, token: str) -> None:
+def _client_is_https(request: Request) -> bool:
+    """Учитывает TLS-терминацию на nginx/caddy (иначе cookie Secure ломает сессию)."""
+    proto = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+    if proto == "https":
+        return True
+    if request.headers.get("x-forwarded-ssl", "").lower() == "on":
+        return True
+    if request.headers.get("front-end-https", "").lower() == "on":
+        return True
+    return request.url.scheme == "https"
+
+
+def _auth_cookie_samesite_secure(request: Request) -> tuple[Literal["lax", "strict", "none"], bool]:
+    """
+    HTTP: без Secure, Lax — иначе браузер не сохранит cookie.
+    HTTPS: None + Secure — иначе при фронте на другом домене cookie не уйдёт с fetch.
+    """
+    if _client_is_https(request):
+        return "none", True
+    return "lax", False
+
+
+def _set_auth_cookie(request: Request, response, token: str) -> None:
+    samesite, secure = _auth_cookie_samesite_secure(request)
     response.set_cookie(
         key="zoomer_auth",
         value=token,
         httponly=True,
-        secure=True,
-        samesite="lax",
+        secure=secure,
+        samesite=samesite,
         max_age=86400,
         path="/",
     )
 
 
-def _clear_auth_cookie(response) -> None:
-    response.delete_cookie(key="zoomer_auth", path="/")
+def _clear_auth_cookie(request: Request, response) -> None:
+    samesite, secure = _auth_cookie_samesite_secure(request)
+    response.delete_cookie(
+        key="zoomer_auth",
+        path="/",
+        secure=secure,
+        httponly=True,
+        samesite=samesite,
+    )
 
 
-def _auth_response(token: str, user: dict, **extra) -> JSONResponse:
+def _auth_response(request: Request, token: str, user: dict, **extra) -> JSONResponse:
     body = {"token": token, "user": user, **extra}
     resp = JSONResponse(content=body)
-    _set_auth_cookie(resp, token)
+    # Дубль для фронта: читается из JS при expose_headers (cookie может быть недоступна из-за домена/HTTPS).
+    resp.headers["X-Auth-Token"] = token
+    _set_auth_cookie(request, resp, token)
     return resp
 
 
@@ -464,15 +497,20 @@ async def auth_check_status(token: str, request: Request):
     # Clean up used token
     del _tg_auth_tokens[token]
 
-    return _auth_response(jwt_token, {
-        "id": uid,
-        "first_name": tg_user.get("first_name", ""),
-        "username": tg_user.get("username"),
-    }, status="authenticated")
+    return _auth_response(
+        request,
+        jwt_token,
+        {
+            "id": uid,
+            "first_name": tg_user.get("first_name", ""),
+            "username": tg_user.get("username"),
+        },
+        status="authenticated",
+    )
 
 
 @app.post("/api/auth/telegram")
-async def auth_telegram(body: TelegramAuthIn):
+async def auth_telegram(body: TelegramAuthIn, request: Request):
     data = body.model_dump(exclude_none=True)
     _verify_telegram_login(data)
     uid = body.id
@@ -496,12 +534,16 @@ async def auth_telegram(body: TelegramAuthIn):
     if isinstance(token, bytes):
         token = token.decode("utf-8")
 
-    return _auth_response(token, {
-        "id": uid,
-        "first_name": body.first_name or "",
-        "username": body.username,
-        "photo_url": body.photo_url,
-    })
+    return _auth_response(
+        request,
+        token,
+        {
+            "id": uid,
+            "first_name": body.first_name or "",
+            "username": body.username,
+            "photo_url": body.photo_url,
+        },
+    )
 
 
 def _iso(dt: Optional[datetime]) -> Optional[str]:
@@ -841,7 +883,7 @@ async def auth_verify_email(body: VerifyEmailIn, request: Request):
     await sql.set_activation_pass_by_email(str(body.email), None)
     em = row[18] or str(body.email).strip().lower()
     token = _issue_jwt(user_id=internal_id, auth="email", username=em)
-    return _auth_response(token, {"id": internal_id, "email": em}, success=True)
+    return _auth_response(request, token, {"id": internal_id, "email": em}, success=True)
 
 
 @app.post("/api/auth/resend-code")
@@ -858,7 +900,7 @@ async def auth_resend_code(body: ResendCodeIn, request: Request):
 
 
 @app.post("/api/auth/google")
-async def auth_google(body: GoogleAuthIn):
+async def auth_google(body: GoogleAuthIn, request: Request):
     # Verify Google ID token via Google's tokeninfo endpoint
     async with aiohttp.ClientSession() as session:
         async with session.get(
@@ -891,12 +933,16 @@ async def auth_google(body: GoogleAuthIn):
             await sql.set_email_verified(internal_id, True)
 
     token = _issue_jwt(user_id=internal_id, auth="email", username=em)
-    return _auth_response(token, {
-        "id": internal_id,
-        "email": em,
-        "first_name": payload.get("given_name", ""),
-        "photo_url": payload.get("picture"),
-    })
+    return _auth_response(
+        request,
+        token,
+        {
+            "id": internal_id,
+            "email": em,
+            "first_name": payload.get("given_name", ""),
+            "photo_url": payload.get("picture"),
+        },
+    )
 
 
 @app.post("/api/auth/login")
@@ -916,7 +962,7 @@ async def auth_login(body: LoginIn, request: Request):
     internal_id = int(row[0])
     em = row[18] or str(body.email).strip().lower()
     token = _issue_jwt(user_id=internal_id, auth="email", username=em)
-    return _auth_response(token, {"id": internal_id, "email": em})
+    return _auth_response(request, token, {"id": internal_id, "email": em})
 
 
 @app.post("/api/auth/reset-password")
@@ -1013,9 +1059,9 @@ async def auth_me(ctx: JwtCtx):
 
 
 @app.post("/api/auth/logout")
-async def auth_logout():
+async def auth_logout(request: Request):
     resp = JSONResponse(content={"success": True})
-    _clear_auth_cookie(resp)
+    _clear_auth_cookie(request, resp)
     return resp
 
 

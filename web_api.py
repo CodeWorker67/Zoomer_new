@@ -24,6 +24,8 @@ from X3 import panel_username_for_site_user
 from config import (
     ADMIN_IDS,
     BOT_URL,
+    JWT_AUTH_COOKIE_SAMESITE,
+    JWT_AUTH_COOKIE_SECURE,
     JWT_SECRET,
     SMTP_FROM,
     SMTP_HOST,
@@ -174,20 +176,40 @@ def _tariff_parts(tariff_id: str) -> tuple[str, str, bool]:
     return desc_key, d, white
 
 
+def _auth_cookie_samesite() -> Literal["lax", "strict", "none"]:
+    s = JWT_AUTH_COOKIE_SAMESITE
+    if s in ("lax", "strict", "none"):
+        return s
+    return "none"
+
+
+def _auth_cookie_secure() -> bool:
+    # Browsers require Secure when SameSite=None.
+    if _auth_cookie_samesite() == "none":
+        return True
+    return JWT_AUTH_COOKIE_SECURE
+
+
 def _set_auth_cookie(response, token: str) -> None:
     response.set_cookie(
         key="zoomer_auth",
         value=token,
         httponly=True,
-        secure=True,
-        samesite="lax",
+        secure=_auth_cookie_secure(),
+        samesite=_auth_cookie_samesite(),
         max_age=86400,
         path="/",
     )
 
 
 def _clear_auth_cookie(response) -> None:
-    response.delete_cookie(key="zoomer_auth", path="/")
+    response.delete_cookie(
+        key="zoomer_auth",
+        path="/",
+        secure=_auth_cookie_secure(),
+        httponly=True,
+        samesite=_auth_cookie_samesite(),
+    )
 
 
 def _auth_response(token: str, user: dict, **extra) -> JSONResponse:

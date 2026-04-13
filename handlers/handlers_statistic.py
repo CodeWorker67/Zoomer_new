@@ -44,14 +44,12 @@ EXCLUDE_IDS = list(range(45, 1046))
 # ---------- Вспомогательные функции конвертации ----------
 def convert_stars_to_rub(amount: int) -> Optional[int]:
     mapping = {
-        66: 99,
-        179: 269,
-        199: 299,
-        333: 499,
         99: 99,
         269: 269,
-        299: 299,
-        499: 499
+        369: 369,
+        199: 199,
+        399: 399,
+        699: 699
     }
     return mapping.get(amount)
 

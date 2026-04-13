@@ -27,6 +27,7 @@ BOT_URL: str = os.environ.get("BOT_URL") or "https://t.me/zoomerskyvpn_bot"
 PUBLIC_SITE_URL: str = (os.environ.get("PUBLIC_SITE_URL") or "").strip().rstrip("/")
 
 JWT_SECRET: Optional[str] = os.environ.get("JWT_SECRET")
+GOOGLE_CLIENT_ID: Optional[str] = os.environ.get("GOOGLE_CLIENT_ID")
 WEB_API_PORT: int = int(os.environ.get("WEB_API_PORT", "8080"))
 
 # Почта для сброса пароля (опционально; иначе код уходит в Telegram, если есть привязка)

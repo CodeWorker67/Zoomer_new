@@ -24,6 +24,7 @@ from X3 import panel_username_for_site_user
 from config import (
     ADMIN_IDS,
     BOT_URL,
+    GOOGLE_CLIENT_ID,
     JWT_SECRET,
     SMTP_FROM,
     SMTP_HOST,
@@ -39,7 +40,6 @@ from logging_config import logger
 from payments.pay_wata import pay_site
 import aiohttp
 
-GOOGLE_CLIENT_ID = "936653148340-kvcp09r27i3q37n0g4qm5s623t868gk5.apps.googleusercontent.com"
 
 # ── Rate limiter (in-memory, per-IP) ─────────────────────────────────
 _rate_limits: dict[str, list[float]] = {}
@@ -901,6 +901,8 @@ async def auth_resend_code(body: ResendCodeIn, request: Request):
 
 @app.post("/api/auth/google")
 async def auth_google(body: GoogleAuthIn, request: Request):
+    if not GOOGLE_CLIENT_ID:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Google login not configured")
     # Verify Google ID token via Google's tokeninfo endpoint
     async with aiohttp.ClientSession() as session:
         async with session.get(

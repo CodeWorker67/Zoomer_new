@@ -11,7 +11,7 @@ from typing import Annotated, Any, Literal, Optional
 
 import bcrypt
 import jwt
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -37,14 +37,69 @@ from config import (
 from lexicon import dct_desc, dct_price, lexicon
 from logging_config import logger
 from payments.pay_wata import pay_site
+import aiohttp
+
+GOOGLE_CLIENT_ID = "936653148340-kvcp09r27i3q37n0g4qm5s623t868gk5.apps.googleusercontent.com"
+
+# ── Rate limiter (in-memory, per-IP) ─────────────────────────────────
+_rate_limits: dict[str, list[float]] = {}
+
+
+def _rate_check(key: str, max_requests: int, window_sec: int) -> bool:
+    """Returns True if allowed, False if rate-limited."""
+    now = time.time()
+    timestamps = _rate_limits.get(key, [])
+    timestamps = [t for t in timestamps if now - t < window_sec]
+    if len(timestamps) >= max_requests:
+        _rate_limits[key] = timestamps
+        return False
+    timestamps.append(now)
+    _rate_limits[key] = timestamps
+    return True
+
+
+def _rate_limit_or_raise(request_ip: str, action: str, max_req: int = 5, window: int = 300):
+    key = f"{action}:{request_ip}"
+    if not _rate_check(key, max_req, window):
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Слишком много попыток. Подождите 5 минут.")
+
+
+# ── Telegram deeplink auth tokens (in-memory) ───────────────────────
+_tg_auth_tokens: dict[str, dict[str, Any]] = {}
+TG_AUTH_TOKEN_TTL = 300  # 5 minutes
+
+
+def _cleanup_expired_tg_tokens() -> None:
+    now = time.time()
+    expired = [k for k, v in _tg_auth_tokens.items() if now - v["created"] > TG_AUTH_TOKEN_TTL]
+    for k in expired:
+        del _tg_auth_tokens[k]
+
+
+def confirm_tg_auth_token(token: str, telegram_user_id: int, first_name: str = "", username: str = None) -> bool:
+    """Called by the bot when user sends /start auth_XXX."""
+    if token not in _tg_auth_tokens:
+        return False
+    entry = _tg_auth_tokens[token]
+    if entry["status"] != "pending":
+        return False
+    entry["status"] = "authenticated"
+    entry["telegram_user"] = {
+        "id": telegram_user_id,
+        "first_name": first_name,
+        "username": username,
+    }
+    return True
+
 
 app = FastAPI(title="Zoomer Web API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://zoomersky.online", "http://localhost:5173"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=["https://zoomersky.online", "https://pussydestroyer.life"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -82,7 +137,7 @@ def _verify_telegram_login(data: dict[str, Any]) -> None:
         ts = int(auth_date)
     except (TypeError, ValueError):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid auth_date")
-    if abs(int(time.time()) - ts) > 86400:
+    if abs(int(time.time()) - ts) > 300:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "auth_date expired")
 
     pairs = []
@@ -119,14 +174,44 @@ def _tariff_parts(tariff_id: str) -> tuple[str, str, bool]:
     return desc_key, d, white
 
 
+def _set_auth_cookie(response, token: str) -> None:
+    response.set_cookie(
+        key="zoomer_auth",
+        value=token,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        max_age=86400,
+        path="/",
+    )
+
+
+def _clear_auth_cookie(response) -> None:
+    response.delete_cookie(key="zoomer_auth", path="/")
+
+
+def _auth_response(token: str, user: dict, **extra) -> JSONResponse:
+    body = {"token": token, "user": user, **extra}
+    resp = JSONResponse(content=body)
+    _set_auth_cookie(resp, token)
+    return resp
+
+
 async def get_jwt_context(
+    request: Request,
     cred: Annotated[Optional[HTTPAuthorizationCredentials], Depends(bearer_scheme)],
 ) -> dict[str, Any]:
-    if cred is None or not cred.credentials:
+    # Try Bearer header first, then cookie
+    raw_token = None
+    if cred and cred.credentials:
+        raw_token = cred.credentials
+    else:
+        raw_token = request.cookies.get("zoomer_auth")
+    if not raw_token:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not authenticated")
     secret = _require_jwt_secret()
     try:
-        payload = jwt.decode(cred.credentials, secret, algorithms=["HS256"])
+        payload = jwt.decode(raw_token, secret, algorithms=["HS256"])
     except jwt.PyJWTError:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")
     uid = payload.get("user_id")
@@ -262,12 +347,25 @@ class CreatePaymentIn(BaseModel):
 
 class RegisterIn(BaseModel):
     email: EmailStr
-    password: str = Field(min_length=1, max_length=256)
+    password: str = Field(min_length=6, max_length=256)
 
 
 class LoginIn(BaseModel):
     email: EmailStr
     password: str = Field(min_length=1, max_length=256)
+
+
+class VerifyEmailIn(BaseModel):
+    email: EmailStr
+    code: str = Field(min_length=6, max_length=6)
+
+
+class ResendCodeIn(BaseModel):
+    email: EmailStr
+
+
+class GoogleAuthIn(BaseModel):
+    credential: str
 
 
 class ResetPasswordIn(BaseModel):
@@ -311,6 +409,62 @@ async def _deliver_reset_code(email: str, code: str, row: tuple) -> None:
         logger.warning("Password reset code for {} not delivered (configure SMTP or Telegram)", email)
 
 
+@app.post("/api/auth/generate-telegram-token")
+async def auth_generate_telegram_token(request: Request):
+    client_ip = request.headers.get("x-real-ip", request.client.host)
+    _rate_limit_or_raise(client_ip, "tg_gen", max_req=10, window=300)
+    _cleanup_expired_tg_tokens()
+    token = secrets.token_urlsafe(32)
+    _tg_auth_tokens[token] = {
+        "status": "pending",
+        "telegram_user": None,
+        "created": time.time(),
+        "client_ip": client_ip,
+    }
+    deeplink = f"tg://resolve?domain={TG_TOKEN.split(':')[0]}&start=auth_{token}"
+    # Also provide https link for cases where tg:// doesn't work
+    bot_username = None
+    try:
+        bot_info = await bot.get_me()
+        bot_username = bot_info.username
+        deeplink = f"https://t.me/{bot_username}?start=auth_{token}"
+    except Exception:
+        pass
+    return {"token": token, "deeplink": deeplink}
+
+
+@app.get("/api/auth/check-status/{token}")
+async def auth_check_status(token: str, request: Request):
+    client_ip = request.headers.get("x-real-ip", request.client.host)
+    _rate_limit_or_raise(client_ip, "tg_check", max_req=120, window=300)
+    _cleanup_expired_tg_tokens()
+    entry = _tg_auth_tokens.get(token)
+    if entry is None:
+        return {"status": "expired"}
+    # Only the same IP that generated the token can check it
+    if entry.get("client_ip") and entry["client_ip"] != client_ip:
+        return {"status": "expired"}
+    if entry["status"] == "pending":
+        return {"status": "pending"}
+    # Authenticated — issue JWT
+    tg_user = entry["telegram_user"]
+    uid = tg_user["id"]
+    user_row = await sql.get_user(uid)
+    if user_row is None:
+        await sql.add_user(uid, False, False)
+
+    jwt_token = _issue_jwt(user_id=uid, auth="telegram", username=tg_user.get("username"))
+
+    # Clean up used token
+    del _tg_auth_tokens[token]
+
+    return _auth_response(jwt_token, {
+        "id": uid,
+        "first_name": tg_user.get("first_name", ""),
+        "username": tg_user.get("username"),
+    }, status="authenticated")
+
+
 @app.post("/api/auth/telegram")
 async def auth_telegram(body: TelegramAuthIn):
     data = body.model_dump(exclude_none=True)
@@ -336,15 +490,12 @@ async def auth_telegram(body: TelegramAuthIn):
     if isinstance(token, bytes):
         token = token.decode("utf-8")
 
-    return {
-        "token": token,
-        "user": {
-            "id": uid,
-            "first_name": body.first_name or "",
-            "username": body.username,
-            "photo_url": body.photo_url,
-        },
-    }
+    return _auth_response(token, {
+        "id": uid,
+        "first_name": body.first_name or "",
+        "username": body.username,
+        "photo_url": body.photo_url,
+    })
 
 
 def _iso(dt: Optional[datetime]) -> Optional[str]:
@@ -376,6 +527,34 @@ async def user_keys(ctx: JwtCtx):
     return {
         "pro_url": sub_url or None,
         "mobile_url": sub_white or None,
+    }
+
+
+@app.get("/api/user/account")
+async def user_account(ctx: JwtCtx):
+    row = await _user_row_from_jwt(ctx)
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+    tg_col = row[1]
+    linked = row[28]
+    email = row[18]
+    auth_type = ctx.get("auth", "telegram")
+
+    tg_id: Optional[int] = None
+    if tg_col is not None and int(tg_col) > 0:
+        tg_id = int(tg_col)
+    elif linked is not None and int(linked) > 0:
+        tg_id = int(linked)
+
+    has_telegram = tg_id is not None
+    has_email = email is not None and str(email).strip() != ""
+
+    return {
+        "auth_type": auth_type,
+        "has_telegram": has_telegram,
+        "has_email": has_email,
+        "email": email if has_email else None,
+        "telegram_id": tg_id,
     }
 
 
@@ -585,26 +764,153 @@ async def gift_activate(ctx: JwtCtx, gift_id: str):
     }
 
 
+def _send_smtp_verification_email(to_email: str, code: str) -> None:
+    if not SMTP_HOST or not SMTP_FROM:
+        raise RuntimeError("SMTP not configured")
+    body = f"Ваш код подтверждения: {code}\n\nКод действителен 15 минут."
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = "Подтверждение email — ZoomerVPN"
+    msg["From"] = SMTP_FROM
+    msg["To"] = to_email
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as s:
+        if SMTP_USER and SMTP_PASSWORD:
+            s.starttls()
+            s.login(SMTP_USER, SMTP_PASSWORD)
+        s.send_message(msg)
+
+
+async def _send_verification_code(email: str) -> str:
+    code = _random_reset_code()
+    expires = datetime.now(timezone.utc) + timedelta(minutes=15)
+    activation_value = f"{code}:{int(expires.timestamp())}"
+    await sql.set_activation_pass_by_email(email, activation_value)
+    try:
+        await asyncio.to_thread(_send_smtp_verification_email, email, code)
+    except Exception as e:
+        logger.warning("SMTP verification email failed: {}", e)
+    return code
+
+
 @app.post("/api/auth/register")
-async def auth_register(body: RegisterIn):
-    if await sql.get_user_by_email(str(body.email)):
-        raise HTTPException(status.HTTP_409_CONFLICT, "Email already registered")
+async def auth_register(body: RegisterIn, request: Request):
+    client_ip = request.headers.get("x-real-ip", request.client.host)
+    _rate_limit_or_raise(client_ip, "register", max_req=5, window=300)
+    existing = await sql.get_user_by_email(str(body.email))
+    if existing:
+        email_verified = bool(existing[24])
+        if email_verified:
+            raise HTTPException(status.HTTP_409_CONFLICT, "Email уже зарегистрирован")
+        # Not verified yet — resend code
+        await _send_verification_code(str(body.email))
+        return {"success": True, "requires_verification": True, "email": str(body.email).strip().lower()}
     h = _hash_password(body.password)
     internal_id = await sql.register_email_user(str(body.email), h)
     em = str(body.email).strip().lower()
+    await _send_verification_code(em)
+    return {"success": True, "requires_verification": True, "email": em}
+
+
+@app.post("/api/auth/verify-email")
+async def auth_verify_email(body: VerifyEmailIn, request: Request):
+    client_ip = request.headers.get("x-real-ip", request.client.host)
+    _rate_limit_or_raise(client_ip, "verify", max_req=10, window=300)
+    if not body.code.isdigit() or len(body.code) != 6:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Неверный код")
+    row = await sql.get_user_by_email(str(body.email))
+    if row is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Пользователь не найден")
+    activation = row[20]
+    if not activation or ":" not in str(activation):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Код не был отправлен")
+    stored_code, expires_ts = str(activation).rsplit(":", 1)
+    try:
+        if int(time.time()) > int(expires_ts):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Код истёк, запросите новый")
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Неверный код")
+    if stored_code != body.code:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Неверный код")
+    internal_id = int(row[0])
+    await sql.set_email_verified(internal_id, True)
+    await sql.set_activation_pass_by_email(str(body.email), None)
+    em = row[18] or str(body.email).strip().lower()
     token = _issue_jwt(user_id=internal_id, auth="email", username=em)
-    return {"token": token, "user": {"id": internal_id, "email": em}}
+    return _auth_response(token, {"id": internal_id, "email": em}, success=True)
+
+
+@app.post("/api/auth/resend-code")
+async def auth_resend_code(body: ResendCodeIn, request: Request):
+    client_ip = request.headers.get("x-real-ip", request.client.host)
+    _rate_limit_or_raise(client_ip, "resend", max_req=3, window=300)
+    row = await sql.get_user_by_email(str(body.email))
+    if row is None:
+        return {"success": True}
+    if bool(row[24]):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Email уже подтверждён")
+    await _send_verification_code(str(body.email))
+    return {"success": True}
+
+
+@app.post("/api/auth/google")
+async def auth_google(body: GoogleAuthIn):
+    # Verify Google ID token via Google's tokeninfo endpoint
+    async with aiohttp.ClientSession() as session:
+        async with session.get(
+            f"https://oauth2.googleapis.com/tokeninfo?id_token={body.credential}"
+        ) as resp:
+            if resp.status != 200:
+                raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid Google token")
+            payload = await resp.json()
+
+    if payload.get("aud") != GOOGLE_CLIENT_ID:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid Google token audience")
+
+    google_email = payload.get("email")
+    if not google_email or not payload.get("email_verified"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Google email not verified")
+
+    em = google_email.strip().lower()
+
+    # Check if user exists
+    row = await sql.get_user_by_email(em)
+    if row is None:
+        # Create new user, already verified (Google verified email)
+        h = _hash_password(secrets.token_hex(32))  # random password
+        internal_id = await sql.register_email_user(em, h)
+        await sql.set_email_verified(internal_id, True)
+    else:
+        internal_id = int(row[0])
+        # Ensure email_verified is set
+        if not bool(row[24]):
+            await sql.set_email_verified(internal_id, True)
+
+    token = _issue_jwt(user_id=internal_id, auth="email", username=em)
+    return _auth_response(token, {
+        "id": internal_id,
+        "email": em,
+        "first_name": payload.get("given_name", ""),
+        "photo_url": payload.get("picture"),
+    })
 
 
 @app.post("/api/auth/login")
-async def auth_login(body: LoginIn):
+async def auth_login(body: LoginIn, request: Request):
+    client_ip = request.headers.get("x-real-ip", request.client.host)
+    _rate_limit_or_raise(client_ip, "login", max_req=10, window=300)
     row = await sql.get_user_by_email(str(body.email))
     if row is None or not _verify_password(body.password, row[27]):
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password")
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Неверный email или пароль")
+    email_verified = bool(row[24])
+    if not email_verified:
+        await _send_verification_code(str(body.email))
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content={"detail": "Email не подтверждён", "requires_verification": True, "email": str(body.email).strip().lower()},
+        )
     internal_id = int(row[0])
     em = row[18] or str(body.email).strip().lower()
     token = _issue_jwt(user_id=internal_id, auth="email", username=em)
-    return {"token": token, "user": {"id": internal_id, "email": em}}
+    return _auth_response(token, {"id": internal_id, "email": em})
 
 
 @app.post("/api/auth/reset-password")
@@ -620,7 +926,9 @@ async def auth_reset_password(body: ResetPasswordIn):
 
 
 @app.post("/api/auth/confirm-reset")
-async def auth_confirm_reset(body: ConfirmResetIn):
+async def auth_confirm_reset(body: ConfirmResetIn, request: Request):
+    client_ip = request.headers.get("x-real-ip", request.client.host)
+    _rate_limit_or_raise(client_ip, "reset_confirm", max_req=10, window=300)
     if not body.code.isdigit() or len(body.code) != 6:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid code")
     if not await sql.verify_password_reset_code(str(body.email), body.code):
@@ -691,6 +999,18 @@ async def auth_link(ctx: JwtCtx, body: LinkIn):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Не удалось объединить аккаунты")
     await sql.delete_linking_code_by_id(code_id)
     return {"success": True, "linkedTelegramId": int(creator[1])}
+
+
+@app.get("/api/auth/me")
+async def auth_me(ctx: JwtCtx):
+    return await user_profile(ctx)
+
+
+@app.post("/api/auth/logout")
+async def auth_logout():
+    resp = JSONResponse(content={"success": True})
+    _clear_auth_cookie(resp)
+    return resp
 
 
 @app.get("/api/user/profile")

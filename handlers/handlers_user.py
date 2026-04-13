@@ -69,6 +69,30 @@ async def process_start_command(message: Message, command: Command):
             in_panel = await activate_gift(message, gift_id)
             await asyncio.sleep(2)
             existing = True
+
+        elif 'auth_' in message.text:
+            # Website deeplink auth
+            auth_token = message.text.split(' ')[1].replace('auth_', '')
+            from web_api import confirm_tg_auth_token
+            ok = confirm_tg_auth_token(
+                auth_token,
+                message.from_user.id,
+                first_name=message.from_user.first_name or "",
+                username=message.from_user.username,
+            )
+            if ok:
+                logger.info(f'Юзер {message.from_user.id} авторизован на сайте через deeplink')
+                from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🌐 Перейти в личный кабинет", url="https://pussydestroyer.life/dashboard")]
+                ])
+                await message.answer("✅ Вы авторизованы на сайте!", reply_markup=kb)
+            else:
+                await message.answer("❌ Ссылка устарела. Попробуйте ещё раз на сайте.")
+            if not user_data:
+                await sql.add_user(message.from_user.id, False, False)
+            return
+
         else:
             if user_data:
                 logger.info(f'Юзер {message.from_user.id} - {message.from_user.username} нажал старт повторно с меткой')

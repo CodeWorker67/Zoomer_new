@@ -1,6 +1,4 @@
-import calendar
 import uuid
-from collections import defaultdict
 
 from sqlalchemy import select, update, delete, func, and_, or_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -26,36 +24,8 @@ from config_bd.models import (
 from lexicon import dct_price
 from logging_config import logger
 
-
-def _analytics_stars_to_rub(amount: int) -> Optional[int]:
-    """Как convert_stars_to_rub в handlers_statistic (без импорта хендлера из utils)."""
-    mapping = {
-        66: 99,
-        179: 269,
-        199: 299,
-        333: 499,
-        99: 99,
-        269: 269,
-        299: 299,
-        499: 499,
-    }
-    return mapping.get(amount)
-
-
-def _analytics_crypto_to_rub(currency: str, amount: str) -> Optional[int]:
-    """Как convert_crypto_to_rub в handlers_statistic."""
-    mapping = {
-        "TON": {"0.9": 99, "2.5": 269, "2.8": 299, "4.6": 499},
-        "USDT": {"1.3": 99, "3.5": 269, "4.0": 299, "6.5": 499},
-    }
-    return mapping.get(currency, {}).get(amount)
-
-
 # Размер батча для IN (...) в PostgreSQL (очень длинные списки режутся).
 _STAT_IN_CHUNK = 8000
-
-# Внутренние id строк в таблице users, исключаемые из anal_export и /month.
-ANALYTICS_EXCLUDE_INTERNAL_USER_ROW_IDS = tuple(range(45, 1046))
 
 _BILLING_OK_STATUSES = ("confirmed", "paid")
 
@@ -247,217 +217,6 @@ _MERGE_PAYMENT_MODELS = (
 )
 
 
-async def _analytics_all_paid_user_ids(session) -> set[int]:
-    """
-    Множество user_id с хотя бы одной учитываемой оплатой — как all_paid_users
-    в handlers_statistic.anal_export (без фильтра is_gift).
-    """
-    paid: set[int] = set()
-    r = await session.execute(
-        select(Payments.user_id)
-        .distinct()
-        .where(Payments.status == "confirmed", Payments.amount != 1)
-    )
-    paid.update(row[0] for row in r.all())
-    r = await session.execute(
-        select(PaymentsStars.user_id).distinct().where(PaymentsStars.status == "confirmed")
-    )
-    paid.update(row[0] for row in r.all())
-    r = await session.execute(
-        select(PaymentsCryptobot.user_id)
-        .distinct()
-        .where(PaymentsCryptobot.status == "paid", PaymentsCryptobot.amount > 0.02)
-    )
-    paid.update(row[0] for row in r.all())
-    r = await session.execute(
-        select(PaymentsCards.user_id)
-        .distinct()
-        .where(PaymentsCards.status == "confirmed", PaymentsCards.amount != 1)
-    )
-    paid.update(row[0] for row in r.all())
-    r = await session.execute(
-        select(PaymentsPlategaCrypto.user_id)
-        .distinct()
-        .where(
-            PaymentsPlategaCrypto.status == "confirmed",
-            PaymentsPlategaCrypto.amount != 1,
-        )
-    )
-    paid.update(row[0] for row in r.all())
-    r = await session.execute(
-        select(PaymentsWataSBP.user_id)
-        .distinct()
-        .where(PaymentsWataSBP.status == "confirmed", PaymentsWataSBP.amount != 1)
-    )
-    paid.update(row[0] for row in r.all())
-    r = await session.execute(
-        select(PaymentsWataCard.user_id)
-        .distinct()
-        .where(PaymentsWataCard.status == "confirmed", PaymentsWataCard.amount != 1)
-    )
-    paid.update(row[0] for row in r.all())
-    return paid
-
-
-async def _non_gift_payment_row_counts(session, user_ids: List[int]) -> dict[int, int]:
-    """
-    Число строк успешных платежей на пользователя (is_gift=False), по тем же порогам сумм/статусов,
-    что и all_paid в anal_export. Суммируется по всем таблицам (несколько каналов = несколько оплат).
-    """
-    if not user_ids:
-        return {}
-    totals: dict[int, int] = defaultdict(int)
-    for i in range(0, len(user_ids), _STAT_IN_CHUNK):
-        chunk = user_ids[i : i + _STAT_IN_CHUNK]
-        pairs = [
-            (
-                Payments,
-                (
-                    Payments.is_gift.is_(False),
-                    Payments.status == "confirmed",
-                    Payments.amount != 1,
-                ),
-            ),
-            (
-                PaymentsStars,
-                (PaymentsStars.is_gift.is_(False), PaymentsStars.status == "confirmed"),
-            ),
-            (
-                PaymentsCryptobot,
-                (
-                    PaymentsCryptobot.is_gift.is_(False),
-                    PaymentsCryptobot.status == "paid",
-                    PaymentsCryptobot.amount > 0.02,
-                ),
-            ),
-            (
-                PaymentsCards,
-                (
-                    PaymentsCards.is_gift.is_(False),
-                    PaymentsCards.status == "confirmed",
-                    PaymentsCards.amount != 1,
-                ),
-            ),
-            (
-                PaymentsPlategaCrypto,
-                (
-                    PaymentsPlategaCrypto.is_gift.is_(False),
-                    PaymentsPlategaCrypto.status == "confirmed",
-                    PaymentsPlategaCrypto.amount != 1,
-                ),
-            ),
-            (
-                PaymentsWataSBP,
-                (
-                    PaymentsWataSBP.is_gift.is_(False),
-                    PaymentsWataSBP.status == "confirmed",
-                    PaymentsWataSBP.amount != 1,
-                ),
-            ),
-            (
-                PaymentsWataCard,
-                (
-                    PaymentsWataCard.is_gift.is_(False),
-                    PaymentsWataCard.status == "confirmed",
-                    PaymentsWataCard.amount != 1,
-                ),
-            ),
-        ]
-        for model, extra_where in pairs:
-            stmt = (
-                select(model.user_id, func.count())
-                .where(model.user_id.in_(chunk), *extra_where)
-                .group_by(model.user_id)
-            )
-            r = await session.execute(stmt)
-            for uid, c in r.all():
-                totals[uid] += int(c)
-    return dict(totals)
-
-
-async def _cohort_lifetime_revenue_rub(session, cohort: set[int]) -> int:
-    """
-    Сумма в рублях по всем успешным платежам пользователей когорты за всё время:
-    подарки и подписки, те же фильтры/конвертации, что блок all_payments в anal_export
-    (без привязки к месяцу платежа).
-    """
-    if not cohort:
-        return 0
-    total = 0
-    ids_list = list(cohort)
-    for i in range(0, len(ids_list), _STAT_IN_CHUNK):
-        chunk = ids_list[i : i + _STAT_IN_CHUNK]
-        r = await session.execute(
-            select(Payments.amount).where(
-                Payments.user_id.in_(chunk),
-                Payments.status == "confirmed",
-                Payments.amount != 1,
-            )
-        )
-        total += sum(row[0] for row in r.all())
-
-        r = await session.execute(
-            select(PaymentsStars.amount).where(
-                PaymentsStars.user_id.in_(chunk),
-                PaymentsStars.status == "confirmed",
-            )
-        )
-        for (amt,) in r.all():
-            rub = _analytics_stars_to_rub(amt)
-            if rub is not None:
-                total += rub
-
-        r = await session.execute(
-            select(PaymentsCryptobot.amount, PaymentsCryptobot.currency).where(
-                PaymentsCryptobot.user_id.in_(chunk),
-                PaymentsCryptobot.status == "paid",
-                PaymentsCryptobot.amount > 0.02,
-            )
-        )
-        for amt, cur in r.all():
-            rub = _analytics_crypto_to_rub(cur, str(amt))
-            if rub is not None:
-                total += rub
-
-        r = await session.execute(
-            select(PaymentsCards.amount).where(
-                PaymentsCards.user_id.in_(chunk),
-                PaymentsCards.status == "confirmed",
-                PaymentsCards.amount != 0,
-            )
-        )
-        total += sum(row[0] for row in r.all())
-
-        r = await session.execute(
-            select(PaymentsPlategaCrypto.amount).where(
-                PaymentsPlategaCrypto.user_id.in_(chunk),
-                PaymentsPlategaCrypto.status == "confirmed",
-                PaymentsPlategaCrypto.amount != 1,
-            )
-        )
-        total += sum(row[0] for row in r.all())
-
-        r = await session.execute(
-            select(PaymentsWataSBP.amount).where(
-                PaymentsWataSBP.user_id.in_(chunk),
-                PaymentsWataSBP.status == "confirmed",
-                PaymentsWataSBP.amount != 1,
-            )
-        )
-        total += sum(row[0] for row in r.all())
-
-        r = await session.execute(
-            select(PaymentsWataCard.amount).where(
-                PaymentsWataCard.user_id.in_(chunk),
-                PaymentsWataCard.status == "confirmed",
-                PaymentsWataCard.amount != 1,
-            )
-        )
-        total += sum(row[0] for row in r.all())
-
-    return int(total)
-
-
 async def _merge_user_paid_subscription_flags(session, user_id: int) -> Tuple[bool, bool]:
     """
     (оплаченный pro-трек, оплаченный white-трек): успешный не-подарочный платёж
@@ -562,6 +321,29 @@ class AsyncSQL:
                 update(Users)
                 .where(Users.id == internal_id)
                 .values(password_hash=password_hash)
+            )
+            r = await session.execute(stmt)
+            await session.commit()
+            return (r.rowcount or 0) > 0
+
+    async def set_activation_pass_by_email(self, email: str, value) -> bool:
+        em = _norm_email(email)
+        async with self.session_factory() as session:
+            stmt = (
+                update(Users)
+                .where(func.lower(Users.email) == em)
+                .values(activation_pass=value)
+            )
+            r = await session.execute(stmt)
+            await session.commit()
+            return (r.rowcount or 0) > 0
+
+    async def set_email_verified(self, internal_id: int, verified: bool) -> bool:
+        async with self.session_factory() as session:
+            stmt = (
+                update(Users)
+                .where(Users.id == internal_id)
+                .values(field_bool_1=verified)
             )
             r = await session.execute(stmt)
             await session.commit()
@@ -1908,94 +1690,5 @@ class AsyncSQL:
             )
             result = await session.execute(stmt)
             return [row[0] for row in result.all()]
-
-    async def get_admin_month_subscription_rows(self, year: int) -> List[Tuple[str, int, int, int, int]]:
-        """
-        По каждому месяцу с января указанного года до текущего месяца (включительно):
-        когорта — пользователи с create_user в этом месяце (как «Новые» в anal_export,
-        с тем же исключением внутренних id строк users);
-        «оплатили» — из когорты те, кто хоть раз попал в all_paid_users anal_export
-        (платёж когда угодно, не обязательно в этом месяце);
-        «активна сейчас» — из них с активной обычной или white-подпиской в users (UTC naive);
-        «рецидивисты» — из числа «активна сейчас» те, у кого ≥2 успешных не-подарочных платежа
-        (строки в таблицах платежей, те же пороги, что у all_paid + is_gift=False);
-        «выручка» — сумма в рублях по всей когорте (все успешные платежи за всё время: подарки+подписки),
-        конвертация Stars/Crypto как в anal_export.
-        """
-        now_utc_naive = _naive_utc(datetime.now(timezone.utc))
-        current_year = now_utc_naive.year
-        current_month = now_utc_naive.month
-        if year > current_year:
-            return []
-
-        last_m = current_month if year == current_year else 12
-        rows: List[Tuple[str, int, int, int, int]] = []
-        month_names = (
-            "Январь",
-            "Февраль",
-            "Март",
-            "Апрель",
-            "Май",
-            "Июнь",
-            "Июль",
-            "Август",
-            "Сентябрь",
-            "Октябрь",
-            "Ноябрь",
-            "Декабрь",
-        )
-
-        async with self.session_factory() as session:
-            all_paid = await _analytics_all_paid_user_ids(session)
-
-            for m in range(1, last_m + 1):
-                start_date = datetime(year, m, 1, 0, 0, 0)
-                last_day = calendar.monthrange(year, m)[1]
-                end_date = datetime(year, m, last_day, 23, 59, 59)
-
-                r_cohort = await session.execute(
-                    select(Users.user_id).where(
-                        Users.create_user.between(start_date, end_date),
-                        ~Users.id.in_(ANALYTICS_EXCLUDE_INTERNAL_USER_ROW_IDS),
-                    )
-                )
-                cohort = {row[0] for row in r_cohort.all()}
-                paid_ids = cohort & all_paid
-
-                n_paid = len(paid_ids)
-                active_uids: List[int] = []
-                if paid_ids:
-                    uids = list(paid_ids)
-                    for i in range(0, len(uids), _STAT_IN_CHUNK):
-                        chunk = uids[i : i + _STAT_IN_CHUNK]
-                        stmt_active = select(Users.user_id).where(
-                            Users.user_id.in_(chunk),
-                            or_(
-                                and_(
-                                    Users.subscription_end_date.isnot(None),
-                                    Users.subscription_end_date > now_utc_naive,
-                                ),
-                                and_(
-                                    Users.white_subscription_end_date.isnot(None),
-                                    Users.white_subscription_end_date > now_utc_naive,
-                                ),
-                            ),
-                        )
-                        r_act = await session.execute(stmt_active)
-                        active_uids.extend(row[0] for row in r_act.all())
-
-                n_active = len(active_uids)
-                n_recid = 0
-                if active_uids:
-                    pay_counts = await _non_gift_payment_row_counts(session, active_uids)
-                    n_recid = sum(1 for uid in active_uids if pay_counts.get(uid, 0) >= 2)
-
-                revenue_rub = await _cohort_lifetime_revenue_rub(session, cohort)
-
-                rows.append(
-                    (f"{month_names[m - 1]} {year}", n_paid, n_active, n_recid, revenue_rub)
-                )
-
-        return rows
 
 

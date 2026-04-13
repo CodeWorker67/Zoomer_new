@@ -15,7 +15,6 @@ from sqlalchemy import select, func
 
 from bot import sql
 from config import ADMIN_IDS, CHECKER_ID, CHECKER_IDS
-from config_bd.utils import ANALYTICS_EXCLUDE_INTERNAL_USER_ROW_IDS
 from logging_config import logger
 from config_bd.models import AsyncSessionLocal, Users, Payments, PaymentsStars, PaymentsCryptobot, PaymentsCards, \
     PaymentsPlategaCrypto, PaymentsWataSBP, PaymentsWataCard
@@ -38,6 +37,9 @@ if CHECKER_ID is not None:
     REF_ZALIV.add(str(CHECKER_ID))
 for _checker_uid in CHECKER_IDS:
     REF_ZALIV.add(str(_checker_uid))
+
+EXCLUDE_IDS = list(range(45, 1046))
+
 
 # ---------- Вспомогательные функции конвертации ----------
 def convert_stars_to_rub(amount: int) -> Optional[int]:
@@ -374,7 +376,7 @@ async def analytics_export(message: Message):
                 # --- Новые пользователи за месяц ---
                 stmt_new_users = select(Users).where(
                     Users.create_user.between(start_date, end_date),
-                    ~Users.id.in_(ANALYTICS_EXCLUDE_INTERNAL_USER_ROW_IDS),
+                    ~Users.id.in_(EXCLUDE_IDS)
                 )
                 result = await session.execute(stmt_new_users)
                 new_users = result.scalars().all()
@@ -607,7 +609,7 @@ async def analytics_export(message: Message):
 
                 stmt_cumulative = select(func.count(Users.id)).where(
                     Users.create_user <= end_date,
-                    ~Users.id.in_(ANALYTICS_EXCLUDE_INTERNAL_USER_ROW_IDS)
+                    ~Users.id.in_(EXCLUDE_IDS)
                 )
                 cumulative_users = (await session.execute(stmt_cumulative)).scalar() or 1
                 arpu = total_revenue / cumulative_users
@@ -673,7 +675,7 @@ async def analytics_export(message: Message):
                 # --- Поденные данные (кумулятивные) ---
                 stmt_before = select(Users.user_id, Users.in_panel, Users.is_connect).where(
                     Users.create_user < start_date,
-                    ~Users.id.in_(ANALYTICS_EXCLUDE_INTERNAL_USER_ROW_IDS)
+                    ~Users.id.in_(EXCLUDE_IDS)
                 )
                 users_before = (await session.execute(stmt_before)).all()
                 cum_users_before = len(users_before)

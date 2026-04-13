@@ -207,6 +207,10 @@ async def pay_for_gift(
         return {"status": "error", "url": "", "id": ""}
 
 
+SITE_SUCCESS_URL = "https://zoomersky.online/success"
+SITE_FAIL_URL = "https://zoomersky.online/pricing"
+
+
 async def pay_site(
     val: str,
     des: str,
@@ -239,8 +243,8 @@ async def pay_site(
             currency="RUB",
             description=des,
             order_id=order_id,
-            success_redirect_url=BOT_URL,
-            fail_redirect_url=BOT_URL,
+            success_redirect_url=SITE_SUCCESS_URL,
+            fail_redirect_url=SITE_FAIL_URL,
         )
         pay_url = result.get("url") or result.get("Url") or ""
         if not pay_url:

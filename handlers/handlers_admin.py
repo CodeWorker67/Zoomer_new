@@ -29,57 +29,6 @@ async def get_photo(message: Message):
     await message.answer(message.photo[-1].file_id)
 
 
-@router.message(Command(commands=['month']))
-async def admin_month_stats(message: Message):
-    """Помесячная когорта (как anal_export): оплаты, активные сейчас, рецидивисты среди активных."""
-    if message.from_user.id not in ADMIN_IDS:
-        return
-
-    try:
-        year = datetime.now(timezone.utc).year
-        args = (message.text or "").split()
-        if len(args) >= 2:
-            year = int(args[1].strip())
-
-        rows = await sql.get_admin_month_subscription_rows(year)
-        if not rows:
-            await message.answer(f"Нет данных для года {year} (год в будущем или некорректен).")
-            return
-
-        lines = [
-            f"📅 {year}. Когорта: зашли в бота в этом месяце (как «Новые» в /anal_export). "
-            f"«Оплатили» — хоть раз по правилам all_paid из /anal_export (дата первой оплаты любая). "
-            f"«Активна сейчас» — обычная или обход, UTC. "
-            f"«Рецидивисты» — из «активна сейчас»: ≥2 успешных оплат с is_gift=false (те же суммы/статусы, что all_paid). "
-            f"«Выручка» — по всей когорте месяца, все успешные платежи за всё время (подарки+подписки), ₽ как в /anal_export.\n"
-        ]
-        for label, n_pay, n_act, n_rec, rev in rows:
-            rev_s = f"{rev:,}".replace(",", " ")
-            lines.append(
-                f"{label} — оплатили: {n_pay} — активна: {n_act} — рецидивисты: {n_rec} — выручка: {rev_s} ₽"
-            )
-
-        text = "\n".join(lines)
-        if len(text) <= 4000:
-            await message.answer(text)
-        else:
-            # Разбиваем на части по ~3500 символов, чтобы уложиться в лимит Telegram
-            chunk: list[str] = []
-            pos = 0
-            while pos < len(text):
-                chunk.append(text[pos : pos + 3500])
-                pos += 3500
-            for i, part in enumerate(chunk):
-                await message.answer(part if i == 0 else f"(продолжение)\n{part}")
-                await asyncio.sleep(0.35)
-
-    except ValueError:
-        await message.answer("❌ Год укажите числом, например: /month 2025")
-    except Exception as e:
-        logger.exception("Ошибка в /month")
-        await message.answer(f"❌ Ошибка: {str(e)}")
-
-
 @router.message(Command(commands=['user']))
 async def user_info(message: Message):
 

@@ -24,8 +24,6 @@ from X3 import panel_username_for_site_user
 from config import (
     ADMIN_IDS,
     BOT_URL,
-    JWT_AUTH_COOKIE_SAMESITE,
-    JWT_AUTH_COOKIE_SECURE,
     JWT_SECRET,
     SMTP_FROM,
     SMTP_HOST,
@@ -98,7 +96,13 @@ app = FastAPI(title="Zoomer Web API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://zoomersky.online", "https://pussydestroyer.life"],
+    allow_origins=[
+        "https://zoomersky.online",
+        "https://pussydestroyer.life",
+        "http://187.127.68.142",
+        "https://4zoomer.top",
+        "http://4zoomer.top",
+    ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
@@ -176,40 +180,20 @@ def _tariff_parts(tariff_id: str) -> tuple[str, str, bool]:
     return desc_key, d, white
 
 
-def _auth_cookie_samesite() -> Literal["lax", "strict", "none"]:
-    s = JWT_AUTH_COOKIE_SAMESITE
-    if s in ("lax", "strict", "none"):
-        return s
-    return "none"
-
-
-def _auth_cookie_secure() -> bool:
-    # Browsers require Secure when SameSite=None.
-    if _auth_cookie_samesite() == "none":
-        return True
-    return JWT_AUTH_COOKIE_SECURE
-
-
 def _set_auth_cookie(response, token: str) -> None:
     response.set_cookie(
         key="zoomer_auth",
         value=token,
         httponly=True,
-        secure=_auth_cookie_secure(),
-        samesite=_auth_cookie_samesite(),
+        secure=True,
+        samesite="lax",
         max_age=86400,
         path="/",
     )
 
 
 def _clear_auth_cookie(response) -> None:
-    response.delete_cookie(
-        key="zoomer_auth",
-        path="/",
-        secure=_auth_cookie_secure(),
-        httponly=True,
-        samesite=_auth_cookie_samesite(),
-    )
+    response.delete_cookie(key="zoomer_auth", path="/")
 
 
 def _auth_response(token: str, user: dict, **extra) -> JSONResponse:

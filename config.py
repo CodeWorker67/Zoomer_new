@@ -27,16 +27,6 @@ BOT_URL: str = os.environ.get("BOT_URL") or "https://t.me/zoomerskyvpn_bot"
 JWT_SECRET: Optional[str] = os.environ.get("JWT_SECRET")
 WEB_API_PORT: int = int(os.environ.get("WEB_API_PORT", "8080"))
 
-# Cookie zoomer_auth: при фронте на другом домене, чем API, нужен samesite=none (и Secure).
-# lax — только если сайт и API на одном «site» (один registrable domain, см. SameSite).
-_samesite = os.environ.get("JWT_AUTH_COOKIE_SAMESITE", "none").strip().lower()
-JWT_AUTH_COOKIE_SAMESITE: str = _samesite if _samesite in ("lax", "strict", "none") else "none"
-JWT_AUTH_COOKIE_SECURE: bool = os.environ.get("JWT_AUTH_COOKIE_SECURE", "true").lower() in (
-    "1",
-    "true",
-    "yes",
-)
-
 # Почта для сброса пароля (опционально; иначе код уходит в Telegram, если есть привязка)
 SMTP_HOST: Optional[str] = os.environ.get("SMTP_HOST")
 SMTP_PORT: int = int(os.environ.get("SMTP_PORT", "587"))

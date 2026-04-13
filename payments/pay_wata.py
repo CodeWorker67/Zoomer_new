@@ -207,8 +207,8 @@ async def pay_for_gift(
         return {"status": "error", "url": "", "id": ""}
 
 
-SITE_SUCCESS_URL = "https://zoomersky.online/success"
-SITE_FAIL_URL = "https://zoomersky.online/pricing"
+SITE_SUCCESS_URL = "https://4zoomer.top/success"
+SITE_FAIL_URL = "https://4zoomer.top/pricing"
 
 
 async def pay_site(

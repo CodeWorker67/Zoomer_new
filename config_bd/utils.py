@@ -971,8 +971,9 @@ class AsyncSQL:
         """
         Возвращает статистику по пользователям, у которых Ref == arg,
         если таких нет – по пользователям с stamp == arg.
-        Возвращает (total, with_sub, with_tarif, total_payments, source)
-        или (None, None, None, None, None) если нет совпадений.
+        total_payments — сумма подтверждённых платежей: Payments + WATA СБП + WATA карта.
+        Возвращает (total, with_sub, with_tarif, with_tarif_not_blocked, total_payments, source)
+        или (None, None, None, None, None, None) если нет совпадений.
         """
         # 1. Ищем по Ref
         users = await self.SELECT_USERS_BY_PARAMETER('Ref', arg)
@@ -1018,6 +1019,16 @@ class AsyncSQL:
                     Payments.status == 'confirmed',
                 )
                 total_payments += (await session.execute(stmt_pay)).scalar() or 0
+                stmt_wata_sbp = select(func.coalesce(func.sum(PaymentsWataSBP.amount), 0)).where(
+                    PaymentsWataSBP.user_id.in_(chunk),
+                    PaymentsWataSBP.status == 'confirmed',
+                )
+                total_payments += (await session.execute(stmt_wata_sbp)).scalar() or 0
+                stmt_wata_card = select(func.coalesce(func.sum(PaymentsWataCard.amount), 0)).where(
+                    PaymentsWataCard.user_id.in_(chunk),
+                    PaymentsWataCard.status == 'confirmed',
+                )
+                total_payments += (await session.execute(stmt_wata_card)).scalar() or 0
 
         total_payments //= 2
 

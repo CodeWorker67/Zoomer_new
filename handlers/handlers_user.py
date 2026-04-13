@@ -1,5 +1,5 @@
 from bot import sql, x3, bot
-from config import CHANEL_ID
+from config import CHANEL_ID, PUBLIC_SITE_URL
 from keyboard import (keyboard_start, keyboard_start_bonus, keyboard_tariff_bonus, keyboard_tariff,
                       keyboard_subscription, keyboard_sub_after_free, ref_keyboard, keyboard_gift_tariff,
                       keyboard_payment_method, keyboard_payment_method_stock, chanel_keyboard, create_kb,
@@ -83,10 +83,22 @@ async def process_start_command(message: Message, command: Command):
             if ok:
                 logger.info(f'Юзер {message.from_user.id} авторизован на сайте через deeplink')
                 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-                kb = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="🌐 Перейти в личный кабинет", url="https://pussydestroyer.life/dashboard")]
-                ])
-                await message.answer("✅ Вы авторизованы на сайте!", reply_markup=kb)
+
+                dashboard_url = f"{PUBLIC_SITE_URL}/dashboard" if PUBLIC_SITE_URL else ""
+                if dashboard_url:
+                    kb = InlineKeyboardMarkup(
+                        inline_keyboard=[
+                            [
+                                InlineKeyboardButton(
+                                    text="🌐 Перейти в личный кабинет",
+                                    url=dashboard_url,
+                                )
+                            ]
+                        ]
+                    )
+                    await message.answer("✅ Вы авторизованы на сайте!", reply_markup=kb)
+                else:
+                    await message.answer("✅ Вы авторизованы на сайте! Вернитесь во вкладку с сайтом.")
             else:
                 await message.answer("❌ Ссылка устарела. Попробуйте ещё раз на сайте.")
             if not user_data:

@@ -149,24 +149,7 @@ async def broadcast_confirm_send(callback: CallbackQuery, state: FSMContext, bot
     # Получаем пользователей по выбранному параметру
     if selected_parameter == "all_users":
         user_ids = await sql.SELECT_ALL_USERS()  # Получаем всех пользователей
-        keyboard_broadcast = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="💰 Купить подписку",
-                        callback_data="buy_vpn",
-                        style=STYLE_SUCCESS,
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        text="🌐 Наш сайт",
-                        url="https://4zoomer.top",
-                        style=STYLE_PRIMARY,
-                    )
-                ],
-            ]
-        )
+        keyboard_broadcast = None
     elif selected_parameter == 'not_connected_subscribe_yes':
         user_ids = await sql.SELECT_NOT_CONNECTED_SUBSCRIBE_YES()
         keyboard_broadcast = create_kb(1, connect_vpn='🔗 Подключить VPN')

@@ -5,10 +5,11 @@ from config import WATA_API_CARD_KEY
 from keyboard import keyboard_payment_cancel
 from lexicon import lexicon
 from logging_config import logger
-from payments.pay_wata import WataPayment, wata_order_payment_state
+from payments.pay_wata import WataPayment, wata_order_payment_state, wata_transactions_status_counts
 from payments.process_payload import process_confirmed_payment
 
-_EMPTY_API_EXPIRE = timedelta(days=14)
+# Как у WATA СБП: нет строк в ответе API по orderId — после срока снимаем pending.
+_EMPTY_API_EXPIRE = timedelta(days=1)
 
 
 async def process_confirmed_wata_card(payment) -> None:
@@ -55,6 +56,11 @@ async def check_wata_card() -> None:
                 order_id = payment.transaction_id
                 items = await client.search_transactions_by_order_id(order_id)
                 tc = payment.time_created
+                logger.debug(
+                    "WATA Карта orderId={} tx_counts={}",
+                    order_id,
+                    wata_transactions_status_counts(items),
+                )
                 if (
                     not items
                     and tc is not None

@@ -676,6 +676,43 @@ class X3:
             logger.error(f"❌ Исключение при обновлении squads: {e}")
             return False
 
+    async def bulk_update_internal_squads(
+        self, user_uuids: list, active_internal_squads: list
+    ) -> tuple[bool, int]:
+        """
+        POST /api/users/bulk/update-squads (до 500 UUID за запрос).
+        Возвращает (успех, affectedRows из ответа или 0).
+        """
+        if not user_uuids:
+            return True, 0
+        try:
+            data = {
+                "uuids": user_uuids,
+                "activeInternalSquads": active_internal_squads,
+            }
+            session = await self._get_session()
+            async with session.post(
+                f"{self.target_url}/api/users/bulk/update-squads",
+                json=data,
+                params=self.params,
+                timeout=aiohttp.ClientTimeout(total=120),
+            ) as response:
+                if response.status != 200:
+                    err = (await response.text())[:500]
+                    logger.error(f"bulk/update-squads HTTP {response.status}: {err}")
+                    return False, 0
+                try:
+                    body = await response.json()
+                except (aiohttp.ContentTypeError, ValueError):
+                    logger.warning("bulk/update-squads: не JSON, считаем успехом")
+                    return True, len(user_uuids)
+                resp = body.get("response") or {}
+                affected = int(resp.get("affectedRows", 0))
+                return True, affected
+        except Exception as e:
+            logger.error(f"bulk/update-squads: {e}")
+            return False, 0
+
     async def get_all_panel(self):
         """
         Возвращает список всех пользователей из панели (объекты пользователей),

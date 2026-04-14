@@ -29,6 +29,12 @@ _NEW_PANEL_SQUAD_UUIDS = frozenset(
     }
 )
 
+_NEW_BULK_SQUAD_CHOICES = (
+    "7c21ebc7-5463-449c-8e9c-44c0677380ab",
+    "bc27ae8e-a5c2-4278-9af2-461623d5dd0d",
+)
+_NEW_BULK_UUID_BATCH = 500
+
 
 @router.message(F.video, F.from_user.id.in_(ADMIN_IDS))
 async def get_video(message: Message):
@@ -524,7 +530,7 @@ async def check_users_command(message: Message):
 
 @router.message(Command(commands=['new']))
 async def new_panel_users_command(message: Message):
-    """get_all_panel → только юзеры с одним из 5 сквадов → 3 чанка по подписке и firstConnectedAt."""
+    """5 сквадов → 3 чанка → POST bulk/update-squads по порядку; сквад на каждый HTTP — random из двух."""
     if message.from_user.id not in ADMIN_IDS:
         return
 
@@ -602,8 +608,43 @@ async def new_panel_users_command(message: Message):
             f"Чанк 2 — подписка ≥ сегодня UTC, firstConnectedAt None: {n2}\n"
             f"Чанк 3 — остальные из этих {n_five}: {n3}"
         )
-        print(report + "\n", flush=True)
-        await message.answer(report)
+
+        async def bulk_apply_chunk(chunk: list, label: str) -> str:
+            uuids = [str(u["uuid"]) for u in chunk if u.get("uuid")]
+            if not uuids:
+                return f"bulk чанк {label}: пусто, пропуск"
+            total_affected = 0
+            all_ok = True
+            n_batches = (len(uuids) + _NEW_BULK_UUID_BATCH - 1) // _NEW_BULK_UUID_BATCH
+            for off in range(0, len(uuids), _NEW_BULK_UUID_BATCH):
+                batch = uuids[off : off + _NEW_BULK_UUID_BATCH]
+                squad = random.choice(_NEW_BULK_SQUAD_CHOICES)
+                ok, aff = await x3.bulk_update_internal_squads(batch, [squad])
+                total_affected += aff
+                if not ok:
+                    all_ok = False
+                bi = off // _NEW_BULK_UUID_BATCH + 1
+                logger.info(
+                    f"/new bulk чанк {label} HTTP {bi}/{n_batches}: "
+                    f"squad={squad} batch_size={len(batch)} ok={ok} affected={aff}"
+                )
+                await asyncio.sleep(0.15)
+            st = "ok" if all_ok else "были ошибки (см. лог)"
+            return (
+                f"bulk чанк {label}: UUID {len(uuids)}, батчей {n_batches}, "
+                f"affected_rows Σ={total_affected}, сквад на каждый запрос случайный, {st}"
+            )
+
+        bulk_lines = [
+            "",
+            "POST /api/users/bulk/update-squads (чанки 1→2→3, на каждый запрос свой random сквад):",
+            await bulk_apply_chunk(chunk1, "1"),
+            await bulk_apply_chunk(chunk2, "2"),
+            await bulk_apply_chunk(chunk3, "3"),
+        ]
+        full_report = report + "\n" + "\n".join(bulk_lines)
+        print(full_report + "\n", flush=True)
+        await message.answer(full_report)
         logger.info(
             f"Админ {message.from_user.id} /new: чанки {n1}/{n2}/{n3}, всего в панели {total}"
         )

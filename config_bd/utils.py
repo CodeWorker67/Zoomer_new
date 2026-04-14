@@ -1232,11 +1232,88 @@ class AsyncSQL:
             result = await session.execute(stmt)
             return result.scalars().all()
 
+    async def count_pending_wata_sbp(self) -> int:
+        async with self.session_factory() as session:
+            stmt = select(func.count()).select_from(PaymentsWataSBP).where(PaymentsWataSBP.status == "pending")
+            return int((await session.execute(stmt)).scalar_one())
+
+    async def count_pending_wata_card(self) -> int:
+        async with self.session_factory() as session:
+            stmt = select(func.count()).select_from(PaymentsWataCard).where(PaymentsWataCard.status == "pending")
+            return int((await session.execute(stmt)).scalar_one())
+
     async def get_pending_wata_card_payments(self) -> List[PaymentsWataCard]:
         async with self.session_factory() as session:
             stmt = select(PaymentsWataCard).where(PaymentsWataCard.status == 'pending')
             result = await session.execute(stmt)
             return result.scalars().all()
+
+    async def get_pending_wata_sbp_payments_polled(
+        self,
+        recent_hours: int = 72,
+        recent_limit: int = 100,
+        stale_limit: int = 50,
+    ) -> List[PaymentsWataSBP]:
+        """
+        Очередь для cron: свежие (недавние) — чтобы оплаты подтверждались быстро;
+        плюс небольшая порция самых старых — чтобы не копился хвост.
+        Без этого один проход по всем pending занимает минуты и APScheduler пропускает тики.
+        """
+        cutoff = datetime.now() - timedelta(hours=recent_hours)
+        async with self.session_factory() as session:
+            q_recent = (
+                select(PaymentsWataSBP)
+                .where(PaymentsWataSBP.status == "pending", PaymentsWataSBP.time_created >= cutoff)
+                .order_by(PaymentsWataSBP.time_created.desc())
+                .limit(recent_limit)
+            )
+            q_stale = (
+                select(PaymentsWataSBP)
+                .where(PaymentsWataSBP.status == "pending", PaymentsWataSBP.time_created < cutoff)
+                .order_by(PaymentsWataSBP.time_created.asc())
+                .limit(stale_limit)
+            )
+            r1 = (await session.execute(q_recent)).scalars().all()
+            r2 = (await session.execute(q_stale)).scalars().all()
+        seen: set[int] = set()
+        out: List[PaymentsWataSBP] = []
+        for p in (*r1, *r2):
+            if p.id in seen:
+                continue
+            seen.add(p.id)
+            out.append(p)
+        return out
+
+    async def get_pending_wata_card_payments_polled(
+        self,
+        recent_hours: int = 72,
+        recent_limit: int = 100,
+        stale_limit: int = 50,
+    ) -> List[PaymentsWataCard]:
+        cutoff = datetime.now() - timedelta(hours=recent_hours)
+        async with self.session_factory() as session:
+            q_recent = (
+                select(PaymentsWataCard)
+                .where(PaymentsWataCard.status == "pending", PaymentsWataCard.time_created >= cutoff)
+                .order_by(PaymentsWataCard.time_created.desc())
+                .limit(recent_limit)
+            )
+            q_stale = (
+                select(PaymentsWataCard)
+                .where(PaymentsWataCard.status == "pending", PaymentsWataCard.time_created < cutoff)
+                .order_by(PaymentsWataCard.time_created.asc())
+                .limit(stale_limit)
+            )
+            r1 = (await session.execute(q_recent)).scalars().all()
+            r2 = (await session.execute(q_stale)).scalars().all()
+        seen: set[int] = set()
+        out: List[PaymentsWataCard] = []
+        for p in (*r1, *r2):
+            if p.id in seen:
+                continue
+            seen.add(p.id)
+            out.append(p)
+        return out
 
     async def update_wata_sbp_status(self, transaction_id: str, new_status: str) -> None:
         async with self.session_factory() as session:

@@ -78,6 +78,20 @@ def _wata_amount_rub(val: str) -> float:
     return round(x, 2)
 
 
+def _wata_norm_status(x: dict) -> str:
+    return (x.get("status") or x.get("Status") or "").strip().lower()
+
+
+def _wata_norm_payment_type(x: dict) -> str:
+    t = (x.get("type") or x.get("Type") or "").strip()
+    tl = t.lower()
+    if tl == "sbp":
+        return "SBP"
+    if tl in ("cardcrypto", "card_crypto", "card"):
+        return "CardCrypto"
+    return t
+
+
 def wata_order_payment_state(items: list, expect_type: str) -> str:
     """
     expect_type: SBP | CardCrypto
@@ -87,25 +101,24 @@ def wata_order_payment_state(items: list, expect_type: str) -> str:
     if not payments:
         return "pending"
 
-    def _status(x):
-        return (x.get("status") or x.get("Status") or "").strip()
-
-    def _type(x):
-        return (x.get("type") or x.get("Type") or "").strip()
-
-    correct_paid = [p for p in payments if _status(p) == "Paid" and _type(p) == expect_type]
+    expect = expect_type.strip()
+    correct_paid = [
+        p for p in payments if _wata_norm_status(p) == "paid" and _wata_norm_payment_type(p) == expect
+    ]
     if correct_paid:
         return "paid"
 
-    wrong_paid = [p for p in payments if _status(p) == "Paid" and _type(p) != expect_type]
+    wrong_paid = [
+        p for p in payments if _wata_norm_status(p) == "paid" and _wata_norm_payment_type(p) != expect
+    ]
     if wrong_paid:
         return "wrong_paid"
 
-    open_states = ("Created", "Pending")
-    if any(_status(p) in open_states for p in payments):
+    open_states = {"created", "pending"}
+    if any(_wata_norm_status(p) in open_states for p in payments):
         return "pending"
 
-    if any(_status(p) == "Declined" for p in payments):
+    if any(_wata_norm_status(p) == "declined" for p in payments):
         return "declined"
 
     return "pending"

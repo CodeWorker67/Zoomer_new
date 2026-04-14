@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 from bot import bot, sql
 from config import WATA_API_SBP_KEY
 from keyboard import keyboard_payment_cancel
@@ -5,6 +7,9 @@ from lexicon import lexicon
 from logging_config import logger
 from payments.pay_wata import WataPayment, wata_order_payment_state
 from payments.process_payload import process_confirmed_payment
+
+# Нет транзакций в WATA по orderId — после этого срока считаем ссылку мёртвой и снимаем с pending.
+_EMPTY_API_EXPIRE = timedelta(days=14)
 
 
 async def process_confirmed_wata_sbp(payment) -> None:
@@ -14,6 +19,18 @@ async def process_confirmed_wata_sbp(payment) -> None:
     await process_confirmed_payment(payment.payload)
 
 
+async def _notify_wata_sbp_cancel(uid) -> None:
+    if uid and int(uid) > 0:
+        try:
+            await bot.send_message(
+                int(uid),
+                lexicon["payment_cancel"],
+                reply_markup=keyboard_payment_cancel(),
+            )
+        except Exception as e:
+            logger.error("WATA СБП cancel notify: {}", e)
+
+
 async def check_wata_sbp() -> None:
     if not WATA_API_SBP_KEY:
         return
@@ -21,18 +38,41 @@ async def check_wata_sbp() -> None:
     client = WataPayment(WATA_API_SBP_KEY)
 
     try:
-        pending_payments = await sql.get_pending_wata_sbp_payments()
+        pending_payments = await sql.get_pending_wata_sbp_payments_polled()
+        total_pending = await sql.count_pending_wata_sbp()
         if not pending_payments:
-            logger.info("✅ Нет платежей WATA СБП со статусом pending")
+            logger.info("✅ Нет платежей WATA СБП в текущей порции опроса")
             return
 
-        logger.info("🔍 Найдено {} платежей WATA СБП pending", len(pending_payments))
+        logger.info(
+            "🔍 WATA СБП: в порции {}, всего pending в БД {}",
+            len(pending_payments),
+            total_pending,
+        )
         processed = confirmed = canceled = 0
 
         for payment in pending_payments:
             try:
                 order_id = payment.transaction_id
                 items = await client.search_transactions_by_order_id(order_id)
+                tc = payment.time_created
+                if (
+                    not items
+                    and tc is not None
+                    and datetime.now() - tc > _EMPTY_API_EXPIRE
+                    and payment.status != "canceled"
+                ):
+                    await sql.update_wata_sbp_status(order_id, "canceled")
+                    logger.info(
+                        "🔄 WATA СБП orderId={} → canceled (нет транзакций в API > {} дн)",
+                        order_id,
+                        _EMPTY_API_EXPIRE.days,
+                    )
+                    canceled += 1
+                    await _notify_wata_sbp_cancel(payment.user_id)
+                    processed += 1
+                    continue
+
                 state = wata_order_payment_state(items, "SBP")
 
                 if state == "paid":
@@ -47,16 +87,7 @@ async def check_wata_sbp() -> None:
                         await sql.update_wata_sbp_status(order_id, "canceled")
                         logger.info("🔄 WATA СБП orderId={} → canceled ({})", order_id, state)
                         canceled += 1
-                        uid = payment.user_id
-                        if uid and int(uid) > 0:
-                            try:
-                                await bot.send_message(
-                                    int(uid),
-                                    lexicon["payment_cancel"],
-                                    reply_markup=keyboard_payment_cancel(),
-                                )
-                            except Exception as e:
-                                logger.error("WATA СБП cancel notify: {}", e)
+                        await _notify_wata_sbp_cancel(payment.user_id)
                     processed += 1
                 else:
                     processed += 1

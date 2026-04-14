@@ -524,7 +524,7 @@ async def check_users_command(message: Message):
 
 @router.message(Command(commands=['new']))
 async def new_panel_users_command(message: Message):
-    """get_all_panel: три чанка (сквады _NEW_PANEL_SQUAD_UUIDS), длины в stdout и в Telegram."""
+    """get_all_panel → только юзеры с одним из 5 сквадов → 3 чанка по подписке и firstConnectedAt."""
     if message.from_user.id not in ADMIN_IDS:
         return
 
@@ -534,6 +534,7 @@ async def new_panel_users_command(message: Message):
         if not users:
             empty_report = (
                 "/new: get_all_panel пуст\n"
+                "С 5 сквадами: 0\n"
                 "Чанк 1: 0\n"
                 "Чанк 2: 0\n"
                 "Чанк 3: 0"
@@ -577,12 +578,15 @@ async def new_panel_users_command(message: Message):
                     return True
             return False
 
+        # Шаг 1: из всей панели только те, у кого в activeInternalSquads есть один из 5 сквадов
+        with_five_squads = [u for u in users if has_allowed_squad(u)]
+        n_five = len(with_five_squads)
+
+        # Шаг 2: разбиваем только этих пользователей на 3 чанка
         chunk1 = []
         chunk2 = []
         chunk3 = []
-        for u in users:
-            if not has_allowed_squad(u):
-                continue
+        for u in with_five_squads:
             if subscription_ok(u) and first_connected_at(u) is not None:
                 chunk1.append(u)
             elif subscription_ok(u) and first_connected_at(u) is None:
@@ -592,10 +596,11 @@ async def new_panel_users_command(message: Message):
 
         n1, n2, n3 = len(chunk1), len(chunk2), len(chunk3)
         report = (
-            f"/new (в панели записей: {total})\n"
-            f"Чанк 1 — сквад из списка, подписка ≥ сегодня UTC, firstConnectedAt не None: {n1}\n"
-            f"Чанк 2 — сквад из списка, подписка ≥ сегодня UTC, firstConnectedAt None: {n2}\n"
-            f"Чанк 3 — сквад из списка, остальные: {n3}"
+            f"/new: в панели записей {total}\n"
+            f"С одним из 5 сквадов (activeInternalSquads): {n_five}\n"
+            f"Чанк 1 — подписка ≥ сегодня UTC, firstConnectedAt не None: {n1}\n"
+            f"Чанк 2 — подписка ≥ сегодня UTC, firstConnectedAt None: {n2}\n"
+            f"Чанк 3 — остальные из этих {n_five}: {n3}"
         )
         print(report + "\n", flush=True)
         await message.answer(report)

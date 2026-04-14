@@ -5,7 +5,7 @@ from config import WATA_API_SBP_KEY
 from keyboard import keyboard_payment_cancel
 from lexicon import lexicon
 from logging_config import logger
-from payments.pay_wata import WataPayment, wata_order_payment_state
+from payments.pay_wata import WataPayment, wata_order_payment_state, wata_transactions_status_counts
 from payments.process_payload import process_confirmed_payment
 
 # Нет транзакций в WATA по orderId — после этого срока считаем ссылку мёртвой и снимаем с pending.
@@ -56,7 +56,11 @@ async def check_wata_sbp() -> None:
                 order_id = payment.transaction_id
                 items = await client.search_transactions_by_order_id(order_id)
                 tc = payment.time_created
-                logger.info("🔍 WATA СБП: items={}", items)
+                logger.debug(
+                    "WATA СБП orderId={} tx_counts={}",
+                    order_id,
+                    wata_transactions_status_counts(items),
+                )
                 if (
                     not items
                     and tc is not None

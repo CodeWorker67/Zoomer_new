@@ -18,6 +18,17 @@ from sheduler.check_connect import check_connect
 
 router = Router()
 
+# Сквады обычной подписки (для /new): хотя бы один uuid в activeInternalSquads
+_NEW_PANEL_SQUAD_UUIDS = frozenset(
+    {
+        "6ba41467-be68-438c-ad6e-5a02f7df826c",
+        "c6973051-58b7-484c-b669-6a123cda465b",
+        "a867561f-8736-4f67-8970-e20fddd00e5e",
+        "29b73cd8-8a68-41cd-99c7-5d30dbac4c71",
+        "d108d4a0-a121-4b52-baee-a97243208179",
+    }
+)
+
 
 @router.message(F.video, F.from_user.id.in_(ADMIN_IDS))
 async def get_video(message: Message):
@@ -508,6 +519,92 @@ async def check_users_command(message: Message):
 
     except Exception as e:
         logger.exception("Ошибка в /check_users")
+        await message.answer(f"❌ Ошибка: {str(e)}")
+
+
+@router.message(Command(commands=['new']))
+async def new_panel_users_command(message: Message):
+    """get_all_panel: три чанка (сквады _NEW_PANEL_SQUAD_UUIDS), длины в stdout и в Telegram."""
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    try:
+        users = await x3.get_all_panel()
+        total = len(users)
+        if not users:
+            empty_report = (
+                "/new: get_all_panel пуст\n"
+                "Чанк 1: 0\n"
+                "Чанк 2: 0\n"
+                "Чанк 3: 0"
+            )
+            print(empty_report + "\n", flush=True)
+            await message.answer(empty_report)
+            logger.info(f"Админ {message.from_user.id} /new: панель пуста")
+            return
+
+        now_utc = datetime.now(timezone.utc)
+        today_utc = now_utc.date()
+        allowed = _NEW_PANEL_SQUAD_UUIDS
+
+        def expire_date_utc(u: dict):
+            s = u.get("expireAt")
+            if not s:
+                return None
+            try:
+                dt = datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt.date()
+            except (ValueError, TypeError):
+                return None
+
+        def subscription_ok(u: dict) -> bool:
+            d = expire_date_utc(u)
+            return d is not None and d >= today_utc
+
+        def first_connected_at(u: dict):
+            ut = u.get("userTraffic")
+            if not isinstance(ut, dict):
+                return None
+            return ut.get("firstConnectedAt")
+
+        def has_allowed_squad(u: dict) -> bool:
+            squads = u.get("activeInternalSquads") or []
+            for s in squads:
+                uid = s.get("uuid") if isinstance(s, dict) else s
+                if uid is not None and str(uid).lower() in allowed:
+                    return True
+            return False
+
+        chunk1 = []
+        chunk2 = []
+        chunk3 = []
+        for u in users:
+            if not has_allowed_squad(u):
+                continue
+            if subscription_ok(u) and first_connected_at(u) is not None:
+                chunk1.append(u)
+            elif subscription_ok(u) and first_connected_at(u) is None:
+                chunk2.append(u)
+            else:
+                chunk3.append(u)
+
+        n1, n2, n3 = len(chunk1), len(chunk2), len(chunk3)
+        report = (
+            f"/new (в панели записей: {total})\n"
+            f"Чанк 1 — сквад из списка, подписка ≥ сегодня UTC, firstConnectedAt не None: {n1}\n"
+            f"Чанк 2 — сквад из списка, подписка ≥ сегодня UTC, firstConnectedAt None: {n2}\n"
+            f"Чанк 3 — сквад из списка, остальные: {n3}"
+        )
+        print(report + "\n", flush=True)
+        await message.answer(report)
+        logger.info(
+            f"Админ {message.from_user.id} /new: чанки {n1}/{n2}/{n3}, всего в панели {total}"
+        )
+
+    except Exception as e:
+        logger.exception("Ошибка в /new")
         await message.answer(f"❌ Ошибка: {str(e)}")
 
 

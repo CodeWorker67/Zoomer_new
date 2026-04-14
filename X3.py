@@ -3,6 +3,7 @@ import datetime
 import hashlib
 import hmac
 import uuid
+import asyncio
 
 import urllib3
 import aiohttp
@@ -332,7 +333,7 @@ class X3:
                 "createdAt": current_time.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z',
                 "hwidDeviceLimit": hwidDeviceLimit,
                 "telegramId": int(user_id),
-                "description": "Test_bot",
+                "description": "New panel user",
                 "activeInternalSquads": squad
             }
 
@@ -683,8 +684,9 @@ class X3:
         lst_users = []
         try:
             users_all = []
-            for i in range(100):  # максимум 50 страниц
+            for i in range(200):  # максимум 50 страниц
                 data = await self.list(1000 * i + 1)
+                await asyncio.sleep(0.1)
                 if data['response']['users']:
                     users_all.extend(data['response']['users'])
                 else:

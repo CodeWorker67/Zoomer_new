@@ -9,7 +9,7 @@ from payments.pay_wata import WataPayment, wata_order_payment_state
 from payments.process_payload import process_confirmed_payment
 
 # Нет транзакций в WATA по orderId — после этого срока считаем ссылку мёртвой и снимаем с pending.
-_EMPTY_API_EXPIRE = timedelta(days=14)
+_EMPTY_API_EXPIRE = timedelta(days=1)
 
 
 async def process_confirmed_wata_sbp(payment) -> None:
@@ -56,6 +56,7 @@ async def check_wata_sbp() -> None:
                 order_id = payment.transaction_id
                 items = await client.search_transactions_by_order_id(order_id)
                 tc = payment.time_created
+                logger.info("🔍 WATA СБП: items={}", items)
                 if (
                     not items
                     and tc is not None

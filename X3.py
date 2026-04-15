@@ -310,8 +310,8 @@ class X3:
                 trafficLimitBytes = 80530636800
                 hwidDeviceLimit = 1
             else:
-                squad_1 = ['41d180d4-4f4c-46d7-81f0-76f45356e777']
-                squad_2 = ['db73ace8-663b-4ef4-91da-0bfa7abe6e90']
+                squad_1 = ['7c21ebc7-5463-449c-8e9c-44c0677380ab']
+                squad_2 = ['bc27ae8e-a5c2-4278-9af2-461623d5dd0d']
                 squad = random.choice([squad_1, squad_2])
                 trafficLimitStrategy = "NO_RESET"
                 trafficLimitBytes = 0

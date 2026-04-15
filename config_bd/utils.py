@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import select, update, delete, func, and_, or_
+from sqlalchemy import select, update, delete, func, and_, or_, cast, Date
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from datetime import datetime, date, timedelta, timezone
 from typing import Any, Optional, List, Tuple, Dict
@@ -711,6 +711,18 @@ class AsyncSQL:
             await session.execute(stmt)
             await session.commit()
 
+    async def update_field_bool_1(self, user_id: int, value: bool):
+        async with self.session_factory() as session:
+            stmt = update(Users).where(Users.user_id == user_id).values(field_bool_1=value)
+            await session.execute(stmt)
+            await session.commit()
+
+    async def update_field_bool_3(self, user_id: int, value: bool):
+        async with self.session_factory() as session:
+            stmt = update(Users).where(Users.user_id == user_id).values(field_bool_3=value)
+            await session.execute(stmt)
+            await session.commit()
+
     async def get_last_notification_date(self, user_id: int) -> Optional[date]:
         async with self.session_factory() as session:
             stmt = select(Users.last_notification_date).where(Users.user_id == user_id)
@@ -724,8 +736,61 @@ class AsyncSQL:
         async with self.session_factory() as session:
             today = date.today()
             stmt = select(Users.user_id).where(
-                Users.is_delete == False,
-                (Users.last_broadcast_date.is_(None)) | (func.date(Users.last_broadcast_date) != today)
+                Users.is_delete == False
+            )
+            result = await session.execute(stmt)
+            return [row[0] for row in result.all()]
+
+    async def SELECT_USER_IDS_ACTIVE_WHITE_SUBSCRIPTION(self) -> List[int]:
+        """user_id с неистёкшей white-подпиской: дата окончания (календарный день UTC) ≥ сегодня UTC."""
+        today_utc = datetime.now(timezone.utc).date()
+        async with self.session_factory() as session:
+            stmt = (
+                select(Users.user_id)
+                .where(
+                    Users.is_delete == False,
+                    Users.white_subscription_end_date.isnot(None),
+                    cast(Users.white_subscription_end_date, Date) >= today_utc,
+                )
+                .order_by(Users.user_id)
+            )
+            result = await session.execute(stmt)
+            return [row[0] for row in result.all()]
+
+    async def SELECT_USER_IDS_ACTIVE_SUBSCRIPTION(self) -> List[int]:
+        """user_id с неистёкшей обычной подпиской: дата окончания (календарный день UTC) ≥ сегодня UTC."""
+        today_utc = datetime.now(timezone.utc).date()
+        async with self.session_factory() as session:
+            stmt = (
+                select(Users.user_id)
+                .where(
+                    Users.is_delete == False,
+                    Users.subscription_end_date.isnot(None),
+                    cast(Users.subscription_end_date, Date) >= today_utc,
+                )
+                .order_by(Users.user_id)
+            )
+            result = await session.execute(stmt)
+            return [row[0] for row in result.all()]
+
+    async def SELECT_USER_IDS_PANEL_EXPIRED_REGULAR_SUBSCRIPTION(self) -> List[int]:
+        """
+        В панели, не удалены, обычная подписка по календарю UTC истекла или даты нет.
+        """
+        today_utc = datetime.now(timezone.utc).date()
+        expired = or_(
+            Users.subscription_end_date.is_(None),
+            cast(Users.subscription_end_date, Date) < today_utc,
+        )
+        async with self.session_factory() as session:
+            stmt = (
+                select(Users.user_id)
+                .where(
+                    Users.is_delete == False,
+                    Users.in_panel == True,
+                    expired,
+                )
+                .order_by(Users.user_id)
             )
             result = await session.execute(stmt)
             return [row[0] for row in result.all()]
@@ -814,8 +879,7 @@ class AsyncSQL:
                 Users.in_panel == True,
                 Users.is_connect == False,
                 Users.is_delete == False,
-                Users.subscription_end_date > current_time,
-                (Users.last_broadcast_date.is_(None)) | (func.date(Users.last_broadcast_date) != today)
+                Users.subscription_end_date > current_time
             )
             result = await session.execute(stmt)
             return [row[0] for row in result.all()]
@@ -829,9 +893,7 @@ class AsyncSQL:
                 Users.is_connect == False,
                 Users.is_delete == False,
                 (Users.subscription_end_date < current_time) |
-                (Users.subscription_end_date.is_(None)),
-                (Users.last_broadcast_date.is_(None)) |
-                (func.date(Users.last_broadcast_date) != today)
+                (Users.subscription_end_date.is_(None))
             )
             result = await session.execute(stmt)
             return [row[0] for row in result.all()]
@@ -845,9 +907,7 @@ class AsyncSQL:
                 Users.is_connect == True,
                 Users.is_delete == False,
                 (Users.subscription_end_date < current_time) |
-                (Users.subscription_end_date.is_(None)),
-                (Users.last_broadcast_date.is_(None)) |
-                (func.date(Users.last_broadcast_date) != today)
+                (Users.subscription_end_date.is_(None))
             )
             result = await session.execute(stmt)
             return [row[0] for row in result.all()]
@@ -861,8 +921,6 @@ class AsyncSQL:
                 Users.is_connect == True,
                 Users.is_delete == False,
                 Users.subscription_end_date > current_time,
-                (Users.last_broadcast_date.is_(None)) |
-                (func.date(Users.last_broadcast_date) != today)
             )
             result = await session.execute(stmt)
             return [row[0] for row in result.all()]
@@ -874,8 +932,6 @@ class AsyncSQL:
                 Users.in_panel == False,
                 Users.is_connect == False,
                 Users.is_delete == False,
-                (Users.last_broadcast_date.is_(None)) |
-                (func.date(Users.last_broadcast_date) != today)
             )
             result = await session.execute(stmt)
             return [row[0] for row in result.all()]
@@ -905,8 +961,6 @@ class AsyncSQL:
             stmt = select(Users.user_id).where(
                 Users.is_connect == True,
                 Users.is_delete == False,
-                (Users.last_broadcast_date.is_(None)) |
-                (func.date(Users.last_broadcast_date) != today),
                 Users.user_id.notin_(paid_subq)
             )
             result = await session.execute(stmt)
@@ -927,7 +981,6 @@ class AsyncSQL:
 
     async def SELECT_SUBSCRIBED(self) -> List[int]:
         async with self.session_factory() as session:
-            # Подзапрос: все пользователи с успешными платежами
             stmt = select(Users.user_id).where(
                 Users.in_panel == True,
                 Users.subscription_end_date != None,

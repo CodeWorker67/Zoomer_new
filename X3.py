@@ -188,12 +188,9 @@ class X3:
                 traffic_limit_bytes = 80530636800
                 hwid_device_limit = 1
             else:
-                squad_1 = ['6ba41467-be68-438c-ad6e-5a02f7df826c']
-                squad_2 = ['c6973051-58b7-484c-b669-6a123cda465b']
-                squad_3 = ['a867561f-8736-4f67-8970-e20fddd00e5e']
-                squad_4 = ['29b73cd8-8a68-41cd-99c7-5d30dbac4c71']
-                squad_5 = ['d108d4a0-a121-4b52-baee-a97243208179']
-                squad = random.choice([squad_1, squad_2, squad_3, squad_4, squad_5])
+                squad_1 = ['7c21ebc7-5463-449c-8e9c-44c0677380ab']
+                squad_2 = ['bc27ae8e-a5c2-4278-9af2-461623d5dd0d']
+                squad = random.choice([squad_1, squad_2])
                 traffic_limit_strategy = "NO_RESET"
                 traffic_limit_bytes = 0
                 hwid_device_limit = 3

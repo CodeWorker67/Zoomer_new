@@ -149,7 +149,7 @@ async def broadcast_confirm_send(callback: CallbackQuery, state: FSMContext, bot
     # Получаем пользователей по выбранному параметру
     if selected_parameter == "all_users":
         user_ids = await sql.SELECT_ALL_USERS()  # Получаем всех пользователей
-        keyboard_broadcast = None
+        keyboard_broadcast = create_kb(1, connect_vpn='🔗 Подключить VPN')
     elif selected_parameter == 'not_connected_subscribe_yes':
         user_ids = await sql.SELECT_NOT_CONNECTED_SUBSCRIBE_YES()
         keyboard_broadcast = create_kb(1, connect_vpn='🔗 Подключить VPN')
@@ -196,6 +196,7 @@ async def broadcast_confirm_send(callback: CallbackQuery, state: FSMContext, bot
             count += 1
         except Exception as e:
             await sql.update_broadcast_status(user_id, 'failed')  # Ошибка отправки
+            await sql.update_delete(user_id, True)
             logger.error(f"Failed to send message to {user_id}: {e}")
             error_text = str(e)
     logger.success(f"Send broadcast to {count} users")

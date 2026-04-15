@@ -178,6 +178,7 @@ async def broadcast_confirm_send(callback: CallbackQuery, state: FSMContext, bot
         await state.clear()
         return
     count = 0
+    admin_chat_id = callback.message.chat.id
     # Отправляем сообщение пользователям
     if CHECKER_ID is not None:
         user_ids.append(CHECKER_ID)
@@ -194,6 +195,16 @@ async def broadcast_confirm_send(callback: CallbackQuery, state: FSMContext, bot
             await sql.update_broadcast_status(user_id, 'sent')  # Успешная отправка
             await asyncio.sleep(0.05)
             count += 1
+            if count % 1000 == 0:
+                try:
+                    await bot.send_message(
+                        admin_chat_id,
+                        f"Отослано {count} пользователям в процессе рассылки",
+                    )
+                except Exception as notify_err:
+                    logger.warning(
+                        f"Broadcast: не удалось отправить прогресс админу: {notify_err}"
+                    )
         except Exception as e:
             await sql.update_broadcast_status(user_id, 'failed')  # Ошибка отправки
             await sql.update_delete(user_id, True)

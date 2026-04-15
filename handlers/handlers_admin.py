@@ -909,16 +909,18 @@ async def add_7_subscribed_confirm(callback: CallbackQuery):
         return
 
     await callback.message.edit_text(
-        f"⏳ Обработка {len(user_ids)} пользователей (обычная подписка)…"
+        f"⏳ Обработка {len(user_ids)} пользователей (только обычная подписка, username в панели = tg id)…"
     )
 
+    admin_chat_id = callback.message.chat.id
     panel_ok = 0
     panel_fail = 0
     msg_ok = 0
     msg_fail = 0
     skipped_chat = 0
 
-    for user_id in user_ids:
+    for n_done, user_id in enumerate(user_ids, start=1):
+        # Только обычный трек: панель `user_id`, не `user_id_white`; в БД правится subscription_end_date (см. X3.updateClient).
         username_panel = str(user_id)
         ok = await x3.updateClient(7, username_panel, user_id)
         if not ok:
@@ -943,6 +945,18 @@ async def add_7_subscribed_confirm(callback: CallbackQuery):
                 skipped_chat += 1
 
         await asyncio.sleep(0.1)
+
+        if n_done % 1000 == 0:
+            try:
+                await bot.send_message(
+                    admin_chat_id,
+                    f"add_7_subscribed: обработано {n_done} / {len(user_ids)} пользователей…",
+                )
+            except Exception as notify_err:
+                logger.warning(
+                    "add_7_subscribed: не удалось отправить прогресс админу: %s",
+                    notify_err,
+                )
 
     await callback.message.answer(
         "Готово (обычная подписка).\n"

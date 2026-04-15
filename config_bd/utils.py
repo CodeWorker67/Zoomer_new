@@ -758,7 +758,10 @@ class AsyncSQL:
             return [row[0] for row in result.all()]
 
     async def SELECT_USER_IDS_ACTIVE_SUBSCRIPTION(self) -> List[int]:
-        """user_id с неистёкшей обычной подпиской: дата окончания (календарный день UTC) ≥ сегодня UTC."""
+        """
+        Только обычная подписка (subscription_end_date), white не учитывается.
+        user_id с неистёкшей подпиской: календарный день окончания UTC ≥ сегодня UTC.
+        """
         today_utc = datetime.now(timezone.utc).date()
         async with self.session_factory() as session:
             stmt = (

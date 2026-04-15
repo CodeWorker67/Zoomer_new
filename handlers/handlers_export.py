@@ -58,6 +58,7 @@ async def export_database_to_excel(message: Message):
                 'create_user', 'reserve_field', 'subscription_end_date',
                 'white_subscription_end_date', 'last_notification_date',
                 'last_broadcast_status', 'last_broadcast_date', 'stamp', 'ttclid',
+                'field_bool_3',
             ]
             header_alignment = Alignment(horizontal="center", vertical="center")
             thin_border = Border(left=Side(style='thin'), right=Side(style='thin'),
@@ -77,7 +78,7 @@ async def export_database_to_excel(message: Message):
                     user.reserve_field, user.subscription_end_date,
                     user.white_subscription_end_date, user.last_notification_date,
                     user.last_broadcast_status, user.last_broadcast_date,
-                    user.stamp, user.ttclid,
+                    user.stamp, user.ttclid, user.field_bool_3,
                 ]
                 for col_num, value in enumerate(row_data, 1):
                     # Форматирование дат

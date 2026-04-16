@@ -9,7 +9,7 @@ from payments.pay_wata import WataPayment, wata_order_payment_state, wata_transa
 from payments.process_payload import process_confirmed_payment
 
 # Как у WATA СБП: нет строк в ответе API по orderId — после срока снимаем pending.
-_EMPTY_API_EXPIRE = timedelta(days=1)
+_EMPTY_API_EXPIRE = timedelta(hours=12)
 
 
 async def process_confirmed_wata_card(payment) -> None:
@@ -69,9 +69,9 @@ async def check_wata_card() -> None:
                 ):
                     await sql.update_wata_card_status(order_id, "canceled")
                     logger.info(
-                        "🔄 WATA Карта orderId={} → canceled (нет транзакций в API > {} дн)",
+                        "🔄 WATA Карта orderId={} → canceled (нет транзакций в API > {} ч)",
                         order_id,
-                        _EMPTY_API_EXPIRE.days,
+                        int(_EMPTY_API_EXPIRE.total_seconds() // 3600),
                     )
                     canceled += 1
                     await _notify_wata_card_cancel(payment.user_id)

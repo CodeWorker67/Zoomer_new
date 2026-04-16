@@ -9,7 +9,7 @@ from payments.pay_wata import WataPayment, wata_order_payment_state, wata_transa
 from payments.process_payload import process_confirmed_payment
 
 # Нет транзакций в WATA по orderId — после этого срока считаем ссылку мёртвой и снимаем с pending.
-_EMPTY_API_EXPIRE = timedelta(days=1)
+_EMPTY_API_EXPIRE = timedelta(hours=12)
 
 
 async def process_confirmed_wata_sbp(payment) -> None:
@@ -69,9 +69,9 @@ async def check_wata_sbp() -> None:
                 ):
                     await sql.update_wata_sbp_status(order_id, "canceled")
                     logger.info(
-                        "🔄 WATA СБП orderId={} → canceled (нет транзакций в API > {} дн)",
+                        "🔄 WATA СБП orderId={} → canceled (нет транзакций в API > {} ч)",
                         order_id,
-                        _EMPTY_API_EXPIRE.days,
+                        int(_EMPTY_API_EXPIRE.total_seconds() // 3600),
                     )
                     canceled += 1
                     await _notify_wata_sbp_cancel(payment.user_id)

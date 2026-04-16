@@ -1089,7 +1089,7 @@ async def add_7_to_all_confirm(callback: CallbackQuery):
     failed = 0
     skipped_non_tg = 0
 
-    for user_id in user_ids:
+    for user_id in user_ids[10000:]:
         if not is_telegram_chat_id(user_id):
             skipped_non_tg += 1
             await asyncio.sleep(0.1)

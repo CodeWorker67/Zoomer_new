@@ -5,7 +5,12 @@ from config import WATA_API_CARD_KEY
 from keyboard import keyboard_payment_cancel
 from lexicon import lexicon
 from logging_config import logger
-from payments.pay_wata import WataPayment, wata_order_payment_state, wata_transactions_status_counts
+from payments.pay_wata import (
+    WataPayment,
+    WATA_DECLINED_CANCEL_GRACE_AFTER_LINK,
+    wata_order_payment_state,
+    wata_transactions_status_counts,
+)
 from payments.process_payload import process_confirmed_payment
 
 # Как у WATA СБП: нет строк в ответе API по orderId — после срока снимаем pending.
@@ -88,12 +93,25 @@ async def check_wata_card() -> None:
                         confirmed += 1
                     processed += 1
                 elif state in ("declined", "wrong_paid"):
-                    if payment.status != "canceled":
+                    if (
+                        state == "declined"
+                        and tc is not None
+                        and datetime.now() - tc < WATA_DECLINED_CANCEL_GRACE_AFTER_LINK
+                    ):
+                        logger.info(
+                            "WATA Карта orderId={}: declined в API, ссылке < {} мин — отмену в БД не делаем (ждём Paid)",
+                            order_id,
+                            int(WATA_DECLINED_CANCEL_GRACE_AFTER_LINK.total_seconds() // 60),
+                        )
+                        processed += 1
+                    elif payment.status != "canceled":
                         await sql.update_wata_card_status(order_id, "canceled")
                         logger.info("🔄 WATA Карта orderId={} → canceled ({})", order_id, state)
                         canceled += 1
                         await _notify_wata_card_cancel(payment.user_id)
-                    processed += 1
+                        processed += 1
+                    else:
+                        processed += 1
                 else:
                     processed += 1
 

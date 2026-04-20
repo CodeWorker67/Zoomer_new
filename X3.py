@@ -74,6 +74,13 @@ class X3:
         if self._session and not self._session.closed:
             await self._session.close()
 
+    @staticmethod
+    def _remnawave_patch_status(panel_status: str) -> str:
+        """PATCH /api/users: только ACTIVE и DISABLED; LIMITED/EXPIRED выставляет панель."""
+        if panel_status == 'DISABLED':
+            return 'DISABLED'
+        return 'ACTIVE'
+
     def generate_client_id(self, tg_id):
         """shortUuid: HMAC-SHA256(секрет, tg_id), 15 символов; white — тот же метод с tg_id*100."""
         if not SHORT_UUID_SECRET:
@@ -416,7 +423,7 @@ class X3:
             else:
                 # Подписка активна - добавляем к существующей дате
                 new_expire_at = current_expire_at + datetime.timedelta(days=day)
-                status = user.get('status', 'ACTIVE')
+                status = self._remnawave_patch_status(user.get('status', 'ACTIVE'))
                 logger.info(f"Подписка пользователя {user_id_str} активна. Добавляем {day} дней")
 
             # Обрабатываем activeInternalSquads

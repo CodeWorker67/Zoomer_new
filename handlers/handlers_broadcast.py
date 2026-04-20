@@ -67,7 +67,7 @@ CUSTOM_PRESETS = [
     ("ref_invite", "Пригласить друзей🫶", STYLE_SUCCESS),
     ("buy_gift", "🎁 Подарить подписку", STYLE_SUCCESS),
     ("r_7", "🤌 7 дней - 99 руб", STYLE_PRIMARY),
-    ("r_30", "🤝 30 дней - 139 руб", STYLE_PRIMARY),
+    ("r_30", "🤝 30 дней - 179 руб", STYLE_PRIMARY),
     ("r_90", "👌 90 дней - 369 руб", STYLE_SUCCESS),
     ("r_120", "🔥 Акция: 120 дней - 369 руб", STYLE_SUCCESS),
     ("r_180", "💪 180 дней - 699 руб", STYLE_SUCCESS),

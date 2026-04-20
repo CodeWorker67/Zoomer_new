@@ -10,6 +10,8 @@ STYLE_PRIMARY = "primary"
 STYLE_SUCCESS = "success"
 STYLE_DANGER = "danger"
 
+SITE_URL = "https://4zoomer.top/"
+
 
 def create_kb(
     width: int,
@@ -70,7 +72,7 @@ def keyboard_start_bonus():
 
 
 def keyboard_start():
-    return create_kb(
+    markup = create_kb(
         1,
         styles={
             "buy_vpn": STYLE_SUCCESS,
@@ -83,6 +85,17 @@ def keyboard_start():
         ref='👫 Рефералка',
         buy_gift='🎁 Подарить подписку',
     )
+    rows = list(markup.inline_keyboard)
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text="Наш сайт",
+                url=SITE_URL,
+                style=STYLE_PRIMARY,
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 _STYLES_TARIFF = {
@@ -199,6 +212,15 @@ def keyboard_subscription(sub_url, sub_url_white):
                 )
             ]
         )
+    buttons.append(
+        [
+            InlineKeyboardButton(
+                text="Войти через сайт",
+                url=SITE_URL,
+                style=STYLE_PRIMARY,
+            )
+        ]
+    )
     buttons.append(
         [
             InlineKeyboardButton(

@@ -89,7 +89,7 @@ def keyboard_start():
     rows.append(
         [
             InlineKeyboardButton(
-                text="Наш сайт",
+                text="🌐 Наш сайт",
                 url=SITE_URL,
                 style=STYLE_PRIMARY,
             )
@@ -215,7 +215,7 @@ def keyboard_subscription(sub_url, sub_url_white):
     buttons.append(
         [
             InlineKeyboardButton(
-                text="Войти через сайт",
+                text="🌐 Войти через сайт",
                 url=SITE_URL,
                 style=STYLE_PRIMARY,
             )
@@ -245,6 +245,13 @@ def keyboard_sub_after_buy(sub_url):
         ],
         [
             InlineKeyboardButton(
+                text="🌐 Войти через сайт",
+                url=SITE_URL,
+                style=STYLE_PRIMARY,
+            )
+        ],
+        [
+            InlineKeyboardButton(
                 text="⚠️ Если страница не загружается",
                 callback_data='import',
                 style=STYLE_DANGER,
@@ -268,6 +275,13 @@ def keyboard_sub_after_free(sub_url):
             InlineKeyboardButton(
                 text="📋 В личный кабинет",
                 url=sub_url,
+                style=STYLE_PRIMARY,
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="🌐 Войти через сайт",
+                url=SITE_URL,
                 style=STYLE_PRIMARY,
             )
         ],

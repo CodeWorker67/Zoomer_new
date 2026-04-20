@@ -54,7 +54,7 @@ async def export_database_to_excel(message: Message):
             # --- Лист USERS ---
             ws_users = wb.create_sheet(title="users")
             users_columns = [
-                'id', 'user_id', 'ref', 'is_delete', 'in_panel', 'is_connect',
+                'id', 'user_id', 'email', 'ref', 'is_delete', 'in_panel', 'is_connect',
                 'create_user', 'reserve_field', 'subscription_end_date',
                 'white_subscription_end_date', 'last_notification_date',
                 'last_broadcast_status', 'last_broadcast_date', 'stamp', 'ttclid',
@@ -73,7 +73,7 @@ async def export_database_to_excel(message: Message):
             # Данные
             for row_num, user in enumerate(users_list, 2):
                 row_data = [
-                    user.id, user.user_id, user.ref, user.is_delete,
+                    user.id, user.user_id, user.email, user.ref, user.is_delete,
                     user.in_panel, user.is_connect, user.create_user,
                     user.reserve_field, user.subscription_end_date,
                     user.white_subscription_end_date, user.last_notification_date,
@@ -82,10 +82,10 @@ async def export_database_to_excel(message: Message):
                 ]
                 for col_num, value in enumerate(row_data, 1):
                     # Форматирование дат
-                    if col_num in (9, 10, 13) and value:  # subscription_end_date, white_subscription_end_date, last_broadcast_date
+                    if col_num in (10, 11, 14) and value:  # subscription_end_date, white_subscription_end_date, last_broadcast_date
                         if isinstance(value, datetime):
                             value = value.strftime('%Y-%m-%d %H:%M:%S')
-                    elif col_num == 11 and value:  # last_notification_date
+                    elif col_num == 12 and value:  # last_notification_date
                         if isinstance(value, datetime):
                             value = value.strftime('%Y-%m-%d')
                     cell = ws_users.cell(row=row_num, column=col_num, value=value)

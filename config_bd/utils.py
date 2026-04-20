@@ -54,6 +54,22 @@ def _billing_days_for_tariff_key(key: str) -> Optional[int]:
     return None
 
 
+def _white_days_from_amount_fallback(amount: Any) -> Optional[int]:
+    """Дни вайт-подписки по сумме (dct_price, ключи с white)."""
+    try:
+        target = int(round(float(amount)))
+    except (TypeError, ValueError):
+        return None
+    for key, price in dct_price.items():
+        if "white" not in key:
+            continue
+        if int(price) != target:
+            continue
+        if key == "white_30":
+            return 30
+    return None
+
+
 def _billing_duration_from_amount_fallback(amount: Any) -> Optional[int]:
     """
     Если в payload нет duration: актуальные суммы из dct_price (несколько тарифов на цену — max дней)
@@ -1949,4 +1965,141 @@ class AsyncSQL:
             result = await session.execute(stmt)
             return [row[0] for row in result.all()]
 
+    async def get_user_subscription_payment_report(
+        self, user_id: int
+    ) -> List[Tuple[datetime, str, str]]:
+        """
+        Успешные платежи пользователя (confirmed/paid) по всем таблицам оплат.
+        Возвращает список (time_created UTC naive, тип подписки, кол-во дней как строка).
+        Дни из payload duration; иначе эвристика по сумме (в т.ч. white_30).
+        """
+        rows_acc: List[Tuple[datetime, str, str]] = []
+
+        def _parse_map(payload: Optional[str]) -> dict[str, str]:
+            if not payload:
+                return {}
+            out: dict[str, str] = {}
+            for part in payload.split(","):
+                if ":" not in part:
+                    continue
+                k, _, v = part.partition(":")
+                out[k.strip()] = v.strip()
+            return out
+
+        def _row_kind_and_days(
+            payload: Optional[str], is_gift: bool, amount: Any
+        ) -> Tuple[str, str]:
+            m = _parse_map(payload)
+            white = m.get("white", "False").lower() == "true"
+            gift = bool(is_gift) or m.get("gift", "False").lower() == "true"
+            dur: Optional[int] = None
+            try:
+                di = int(m.get("duration", "0") or "0")
+                if di > 0:
+                    dur = di
+            except ValueError:
+                pass
+            if dur is None:
+                try:
+                    amt_f = float(amount)
+                except (TypeError, ValueError):
+                    amt_f = None
+                if amt_f is not None:
+                    if white:
+                        dur = _white_days_from_amount_fallback(amt_f)
+                    else:
+                        dur = _billing_duration_from_amount_fallback(amt_f)
+
+            if gift and white:
+                label = "Подарок, вайт (mobile)"
+            elif gift:
+                label = "Подарок, обычная"
+            elif white:
+                label = "Вайт (mobile)"
+            else:
+                label = "Обычная"
+
+            days_s = str(dur) if dur is not None else "—"
+            return label, days_s
+
+        async with self.session_factory() as session:
+            queries: List[Any] = [
+                select(
+                    Payments.user_id,
+                    Payments.time_created,
+                    Payments.amount,
+                    Payments.payload,
+                    Payments.is_gift,
+                ).where(
+                    Payments.user_id == user_id,
+                    Payments.status.in_(_BILLING_OK_STATUSES),
+                ),
+                select(
+                    PaymentsCards.user_id,
+                    PaymentsCards.time_created,
+                    PaymentsCards.amount,
+                    PaymentsCards.payload,
+                    PaymentsCards.is_gift,
+                ).where(
+                    PaymentsCards.user_id == user_id,
+                    PaymentsCards.status.in_(_BILLING_OK_STATUSES),
+                ),
+                select(
+                    PaymentsPlategaCrypto.user_id,
+                    PaymentsPlategaCrypto.time_created,
+                    PaymentsPlategaCrypto.amount,
+                    PaymentsPlategaCrypto.payload,
+                    PaymentsPlategaCrypto.is_gift,
+                ).where(
+                    PaymentsPlategaCrypto.user_id == user_id,
+                    PaymentsPlategaCrypto.status.in_(_BILLING_OK_STATUSES),
+                ),
+                select(
+                    PaymentsStars.user_id,
+                    PaymentsStars.time_created,
+                    PaymentsStars.amount,
+                    PaymentsStars.payload,
+                    PaymentsStars.is_gift,
+                ).where(
+                    PaymentsStars.user_id == user_id,
+                    PaymentsStars.status.in_(_BILLING_OK_STATUSES),
+                ),
+                select(
+                    PaymentsCryptobot.user_id,
+                    PaymentsCryptobot.time_created,
+                    PaymentsCryptobot.amount,
+                    PaymentsCryptobot.payload,
+                    PaymentsCryptobot.is_gift,
+                ).where(
+                    PaymentsCryptobot.user_id == user_id,
+                    PaymentsCryptobot.status.in_(_BILLING_OK_STATUSES),
+                ),
+                select(
+                    PaymentsWataSBP.user_id,
+                    PaymentsWataSBP.time_created,
+                    PaymentsWataSBP.amount,
+                    PaymentsWataSBP.payload,
+                    PaymentsWataSBP.is_gift,
+                ).where(
+                    PaymentsWataSBP.user_id == user_id,
+                    PaymentsWataSBP.status.in_(_BILLING_OK_STATUSES),
+                ),
+                select(
+                    PaymentsWataCard.user_id,
+                    PaymentsWataCard.time_created,
+                    PaymentsWataCard.amount,
+                    PaymentsWataCard.payload,
+                    PaymentsWataCard.is_gift,
+                ).where(
+                    PaymentsWataCard.user_id == user_id,
+                    PaymentsWataCard.status.in_(_BILLING_OK_STATUSES),
+                ),
+            ]
+            for q in queries:
+                for _uid, tc, amt, pl, ig in (await session.execute(q)).all():
+                    kind, days_s = _row_kind_and_days(pl, bool(ig), amt)
+                    rows_acc.append((tc, kind, days_s))
+
+        rows_acc.sort(key=lambda x: (x[0], x[1]))
+        return rows_acc
 

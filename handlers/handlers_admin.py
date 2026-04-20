@@ -214,8 +214,6 @@ async def pay_info_command(message: Message):
         f"Подписка вайт в БД бота — {_msk_dt_str(white_db)}\n"
         f"Подписка вайт в панели — {_panel_sub_line(ar_white)}\n\n"
         f"<b>Платежи:</b>\n"
-        "История транзакций в API панели Remnawave недоступна; ниже — "
-        "успешные оплаты из БД бота (тип и дни из payload / суммы).\n\n"
     )
     if pay_lines:
         body += "\n".join(pay_lines)

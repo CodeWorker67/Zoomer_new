@@ -6,7 +6,8 @@ from aiogram.types import BotCommand
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from bot import bot
-from config import WEB_API_PORT
+from config import ADMIN_IDS, THROTTLE_MAX_UPDATES, THROTTLE_WINDOW_SEC, WEB_API_PORT
+from middleware.user_throttle import UserThrottleMiddleware
 from config_bd.models import create_tables, engine
 from payments import pay_stars, pay_cryptobot, pay_platega, pay_wata
 from sheduler.check_connect import check_connect
@@ -34,6 +35,13 @@ async def main() -> None:
 
     # Инициализация диспетчера
     dp: Dispatcher = Dispatcher()
+    dp.update.outer_middleware(
+        UserThrottleMiddleware(
+            max_per_window=THROTTLE_MAX_UPDATES,
+            window_sec=THROTTLE_WINDOW_SEC,
+            bypass_user_ids=ADMIN_IDS,
+        )
+    )
     dp.include_router(handlers_broadcast.router)
     dp.include_router(handlers_admin.router)
     dp.include_router(handlers_import.router)

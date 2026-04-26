@@ -9,7 +9,6 @@ from payments.pay_wata import (
     WataPayment,
     WATA_DECLINED_CANCEL_GRACE_AFTER_LINK,
     wata_order_payment_state,
-    wata_transactions_status_counts,
 )
 from payments.process_payload import process_confirmed_payment
 
@@ -61,11 +60,6 @@ async def check_wata_sbp() -> None:
                 order_id = payment.transaction_id
                 items = await client.search_transactions_by_order_id(order_id)
                 tc = payment.time_created
-                logger.debug(
-                    "WATA СБП orderId={} tx_counts={}",
-                    order_id,
-                    wata_transactions_status_counts(items),
-                )
                 if (
                     not items
                     and tc is not None

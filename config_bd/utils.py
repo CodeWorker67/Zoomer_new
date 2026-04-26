@@ -1428,6 +1428,45 @@ class AsyncSQL:
             stmt = select(func.count()).select_from(PaymentsWataCard).where(PaymentsWataCard.status == "pending")
             return int((await session.execute(stmt)).scalar_one())
 
+    async def count_open_payment_slots_for_user(self, user_id: int) -> int:
+        """
+        Незавершённые попытки оплаты у пользователя (все каналы вместе):
+        WATA pending, Platega pending, Cryptobot неоплаченный счёт (active / устаревший pending в БД).
+        """
+        uid = int(user_id)
+        async with self.session_factory() as session:
+            total = 0
+            pairs = (
+                (
+                    PaymentsWataSBP,
+                    and_(PaymentsWataSBP.user_id == uid, PaymentsWataSBP.status == "pending"),
+                ),
+                (
+                    PaymentsWataCard,
+                    and_(PaymentsWataCard.user_id == uid, PaymentsWataCard.status == "pending"),
+                ),
+                (
+                    PaymentsCryptobot,
+                    and_(
+                        PaymentsCryptobot.user_id == uid,
+                        or_(
+                            PaymentsCryptobot.status == "active",
+                            PaymentsCryptobot.status == "pending",
+                        ),
+                    ),
+                ),
+                (Payments, and_(Payments.user_id == uid, Payments.status == "pending")),
+                (PaymentsCards, and_(PaymentsCards.user_id == uid, PaymentsCards.status == "pending")),
+                (
+                    PaymentsPlategaCrypto,
+                    and_(PaymentsPlategaCrypto.user_id == uid, PaymentsPlategaCrypto.status == "pending"),
+                ),
+            )
+            for model, cond in pairs:
+                q = select(func.count()).select_from(model).where(cond)
+                total += int((await session.execute(q)).scalar_one())
+        return total
+
     async def get_pending_wata_card_payments(self) -> List[PaymentsWataCard]:
         async with self.session_factory() as session:
             stmt = select(PaymentsWataCard).where(PaymentsWataCard.status == 'pending')

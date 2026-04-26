@@ -4,10 +4,11 @@ from aiogram import F, Router
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 
 from bot import sql
-from config import CRYPTOBOT_API_TOKEN, ADMIN_IDS
+from config import CRYPTOBOT_API_TOKEN, ADMIN_IDS, PAYMENT_MAX_PENDING_PER_USER
 from keyboard import create_kb, STYLE_SUCCESS
 from lexicon import lexicon, dct_price, dct_desc
 from logging_config import logger
+from payments.payment_limits import payment_creation_allowed
 
 router: Router = Router()
 
@@ -92,6 +93,9 @@ async def create_cryptobot_payment(rub_amount: int, description: str,
     Создание платежа через Cryptobot с суммой в рублях.
     Пользователь сам выбирает криптовалюту внутри Cryptobot.
     """
+    if not await payment_creation_allowed(int(user_id)):
+        return {"status": "rate_limited", "url": "", "invoice_id": ""}
+
     cryptobot = CryptoBotPayment(CRYPTOBOT_API_TOKEN)
 
     payload = (f"user_id:{user_id},duration:{duration},white:{white},"
@@ -180,6 +184,11 @@ async def process_payment_crypto(callback: CallbackQuery):
         ])
         await callback.message.edit_text(text, reply_markup=pay_keyboard)
         logger.info(f"Юзер {user_id} создал счет в Cryptobot на {rub_amount} руб {'(подарок)' if gift_flag else ''}")
+    elif result.get("status") == "rate_limited":
+        await callback.message.answer(
+            lexicon["payment_too_many_pending"].format(PAYMENT_MAX_PENDING_PER_USER),
+            reply_markup=create_kb(1, back_to_main="🔙 Назад"),
+        )
     else:
         await callback.message.answer(
             lexicon.get('error_payment', 'Произошла ошибка при создании счета.'),

@@ -5,10 +5,11 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery
 
 from bot import sql
-from config import PLATEGA_API_KEY, PLATEGA_MERCHANT_ID, ADMIN_IDS
+from config import PLATEGA_API_KEY, PLATEGA_MERCHANT_ID, ADMIN_IDS, PAYMENT_MAX_PENDING_PER_USER
 from keyboard import keyboard_payment_sbp, create_kb
 from lexicon import dct_price, dct_desc, lexicon
 from logging_config import logger
+from payments.payment_limits import payment_creation_allowed
 
 router = Router()
 
@@ -92,6 +93,8 @@ class PlategaPayment:
 
 async def pay(val: str, des: str, user_id: str, duration: str, white: bool, payment_method: int = 2) -> Dict:
     """Создание платежа для совместимости с pay_yoo.py"""
+    if not await payment_creation_allowed(int(user_id)):
+        return {"status": "rate_limited", "url": "", "id": ""}
 
     platega = PlategaPayment(PLATEGA_API_KEY, PLATEGA_MERCHANT_ID)
     if payment_method == 2:
@@ -136,6 +139,8 @@ async def pay(val: str, des: str, user_id: str, duration: str, white: bool, paym
 
 async def pay_for_gift(val: str, des: str, user_id: str, duration: str, white: bool, payment_method: int = 2) -> Dict:
     """Создание платежа для совместимости с pay_yoo.py"""
+    if not await payment_creation_allowed(int(user_id)):
+        return {"status": "rate_limited", "url": "", "id": ""}
 
     platega = PlategaPayment(PLATEGA_API_KEY, PLATEGA_MERCHANT_ID)
     if payment_method == 2:
@@ -236,6 +241,11 @@ async def process_payment_sbp(callback: CallbackQuery):
             error_message = f"Ошибка при создании счета: {str(e)}"
             logger.error(error_message)
             await callback.message.answer(lexicon['error_payment'], reply_markup=create_kb(1, back_to_main='🔙 Назад'))
+    elif payment_info['status'] == 'rate_limited':
+        await callback.message.answer(
+            lexicon['payment_too_many_pending'].format(PAYMENT_MAX_PENDING_PER_USER),
+            reply_markup=create_kb(1, back_to_main='🔙 Назад'),
+        )
 
 
 @router.callback_query(F.data.startswith('card_'))
@@ -297,6 +307,11 @@ async def process_payment_card(callback: CallbackQuery):
             error_message = f"Ошибка при создании счета: {str(e)}"
             logger.error(error_message)
             await callback.message.answer(lexicon['error_payment'], reply_markup=create_kb(1, back_to_main='🔙 Назад'))
+    elif payment_info['status'] == 'rate_limited':
+        await callback.message.answer(
+            lexicon['payment_too_many_pending'].format(PAYMENT_MAX_PENDING_PER_USER),
+            reply_markup=create_kb(1, back_to_main='🔙 Назад'),
+        )
 
 
 # @router.callback_query(F.data.startswith('crypto_'))

@@ -8,7 +8,8 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery
 
 from bot import sql
-from config import ADMIN_IDS, BOT_URL, WATA_API_BASE, WATA_API_CARD_KEY, WATA_API_SBP_KEY
+from config import ADMIN_IDS, BOT_URL, PAYMENT_MAX_PENDING_PER_USER, WATA_API_BASE, WATA_API_CARD_KEY, WATA_API_SBP_KEY
+from payments.payment_limits import payment_creation_allowed
 from keyboard import keyboard_payment_sbp, create_kb
 from lexicon import dct_price, dct_desc, lexicon
 from logging_config import logger
@@ -209,6 +210,8 @@ async def pay(
     white: bool,
     kind: WataKind,
 ) -> Dict[str, Any]:
+    if not await payment_creation_allowed(int(user_id)):
+        return {"status": "rate_limited", "url": "", "id": ""}
     token = WATA_API_SBP_KEY if kind == "sbp" else WATA_API_CARD_KEY
     if not token:
         logger.error("WATA: отсутствует токен для {}", kind)
@@ -258,6 +261,8 @@ async def pay_for_gift(
     white: bool,
     kind: WataKind,
 ) -> Dict[str, Any]:
+    if not await payment_creation_allowed(int(user_id)):
+        return {"status": "rate_limited", "url": "", "id": ""}
     token = WATA_API_SBP_KEY if kind == "sbp" else WATA_API_CARD_KEY
     if not token:
         logger.error("WATA: отсутствует токен для {}", kind)
@@ -312,6 +317,8 @@ async def pay_site(
     kind: WataKind,
 ) -> Dict[str, Any]:
     """Оплата с сайта (web API): payload с user_id/email, method wata_sbp/wata_card, source:site."""
+    if not await payment_creation_allowed(int(billing_user_id)):
+        return {"status": "rate_limited", "url": "", "id": ""}
     token = WATA_API_SBP_KEY if kind == "sbp" else WATA_API_CARD_KEY
     if not token:
         logger.error("WATA site: отсутствует токен для {}", kind)
@@ -420,6 +427,11 @@ async def process_payment_wata_sbp(callback: CallbackQuery):
         except Exception as e:
             logger.error("WATA СБП UI: {}", e)
             await callback.message.answer(lexicon["error_payment"], reply_markup=create_kb(1, back_to_main="🔙 Назад"))
+    elif payment_info["status"] == "rate_limited":
+        await callback.message.answer(
+            lexicon["payment_too_many_pending"].format(PAYMENT_MAX_PENDING_PER_USER),
+            reply_markup=create_kb(1, back_to_main="🔙 Назад"),
+        )
 
 
 @router.callback_query(F.data.startswith("wata_card_"))
@@ -475,3 +487,8 @@ async def process_payment_wata_card(callback: CallbackQuery):
         except Exception as e:
             logger.error("WATA Card UI: {}", e)
             await callback.message.answer(lexicon["error_payment"], reply_markup=create_kb(1, back_to_main="🔙 Назад"))
+    elif payment_info["status"] == "rate_limited":
+        await callback.message.answer(
+            lexicon["payment_too_many_pending"].format(PAYMENT_MAX_PENDING_PER_USER),
+            reply_markup=create_kb(1, back_to_main="🔙 Назад"),
+        )

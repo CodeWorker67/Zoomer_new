@@ -34,6 +34,9 @@ WEB_API_PORT: int = int(os.environ.get("WEB_API_PORT", "8080"))
 THROTTLE_MAX_UPDATES: int = int(os.environ.get("THROTTLE_MAX_UPDATES", "25"))
 THROTTLE_WINDOW_SEC: float = float(os.environ.get("THROTTLE_WINDOW_SEC", "8"))
 
+# Максимум одновременно «висящих» счетов на пользователя (WATA СБП/карта, Platega, Cryptobot — в сумме).
+PAYMENT_MAX_PENDING_PER_USER: int = int(os.environ.get("PAYMENT_MAX_PENDING_PER_USER", "8"))
+
 # Почта для сброса пароля (опционально; иначе код уходит в Telegram, если есть привязка)
 SMTP_HOST: Optional[str] = os.environ.get("SMTP_HOST")
 SMTP_PORT: int = int(os.environ.get("SMTP_PORT", "587"))

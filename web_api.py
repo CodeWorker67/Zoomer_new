@@ -26,6 +26,7 @@ from config import (
     BOT_URL,
     GOOGLE_CLIENT_ID,
     JWT_SECRET,
+    PAYMENT_MAX_PENDING_PER_USER,
     SMTP_FROM,
     SMTP_HOST,
     SMTP_PASSWORD,
@@ -752,6 +753,11 @@ async def payments_create(ctx: JwtCtx, body: CreatePaymentIn):
         kind=body.method,
     )
 
+    if result["status"] == "rate_limited":
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            lexicon["payment_too_many_pending"].format(PAYMENT_MAX_PENDING_PER_USER),
+        )
     if result["status"] != "pending":
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Не удалось создать платёж")
 

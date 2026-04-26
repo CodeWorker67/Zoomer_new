@@ -86,14 +86,20 @@ class CryptoBotPayment:
             return None
 
 
-async def create_cryptobot_payment(rub_amount: int, description: str,
-                                   user_id: int, duration: str, white: bool,
-                                   is_gift: bool) -> Dict:
+async def create_cryptobot_payment(
+    rub_amount: int,
+    description: str,
+    user_id: int,
+    duration: str,
+    white: bool,
+    is_gift: bool,
+    telegram_username: Optional[str] = None,
+) -> Dict:
     """
     Создание платежа через Cryptobot с суммой в рублях.
     Пользователь сам выбирает криптовалюту внутри Cryptobot.
     """
-    if not await payment_creation_allowed(int(user_id)):
+    if not await payment_creation_allowed(int(user_id), telegram_username):
         return {"status": "rate_limited", "url": "", "invoice_id": ""}
 
     cryptobot = CryptoBotPayment(CRYPTOBOT_API_TOKEN)
@@ -166,7 +172,8 @@ async def process_payment_crypto(callback: CallbackQuery):
         user_id=user_id,
         duration=duration,
         white=white_flag,
-        is_gift=gift_flag
+        is_gift=gift_flag,
+        telegram_username=callback.from_user.username,
     )
 
     if result['status'] == 'pending':

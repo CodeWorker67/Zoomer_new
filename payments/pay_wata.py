@@ -1,7 +1,7 @@
 import uuid
 from collections import Counter
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Literal
+from typing import Any, Dict, List, Literal, Optional
 
 import aiohttp
 from aiogram import Router, F
@@ -209,8 +209,9 @@ async def pay(
     duration: str,
     white: bool,
     kind: WataKind,
+    telegram_username: Optional[str] = None,
 ) -> Dict[str, Any]:
-    if not await payment_creation_allowed(int(user_id)):
+    if not await payment_creation_allowed(int(user_id), telegram_username):
         return {"status": "rate_limited", "url": "", "id": ""}
     token = WATA_API_SBP_KEY if kind == "sbp" else WATA_API_CARD_KEY
     if not token:
@@ -260,8 +261,9 @@ async def pay_for_gift(
     duration: str,
     white: bool,
     kind: WataKind,
+    telegram_username: Optional[str] = None,
 ) -> Dict[str, Any]:
-    if not await payment_creation_allowed(int(user_id)):
+    if not await payment_creation_allowed(int(user_id), telegram_username):
         return {"status": "rate_limited", "url": "", "id": ""}
     token = WATA_API_SBP_KEY if kind == "sbp" else WATA_API_CARD_KEY
     if not token:
@@ -315,9 +317,10 @@ async def pay_site(
     white: bool,
     is_gift: bool,
     kind: WataKind,
+    telegram_username: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Оплата с сайта (web API): payload с user_id/email, method wata_sbp/wata_card, source:site."""
-    if not await payment_creation_allowed(int(billing_user_id)):
+    if not await payment_creation_allowed(int(billing_user_id), telegram_username):
         return {"status": "rate_limited", "url": "", "id": ""}
     token = WATA_API_SBP_KEY if kind == "sbp" else WATA_API_CARD_KEY
     if not token:
@@ -391,6 +394,7 @@ async def process_payment_wata_sbp(callback: CallbackQuery):
     if "old" in duration:
         duration = duration.replace("old", "")
 
+    tg_uname = callback.from_user.username
     if gift_flag:
         payment_info = await pay_for_gift(
             val=str(rub_amount),
@@ -399,6 +403,7 @@ async def process_payment_wata_sbp(callback: CallbackQuery):
             duration=duration,
             white=white_flag,
             kind="sbp",
+            telegram_username=tg_uname,
         )
     else:
         payment_info = await pay(
@@ -408,6 +413,7 @@ async def process_payment_wata_sbp(callback: CallbackQuery):
             duration=duration,
             white=white_flag,
             kind="sbp",
+            telegram_username=tg_uname,
         )
 
     if payment_info["status"] == "pending":
@@ -451,6 +457,7 @@ async def process_payment_wata_card(callback: CallbackQuery):
     if "old" in duration:
         duration = duration.replace("old", "")
 
+    tg_uname = callback.from_user.username
     if gift_flag:
         payment_info = await pay_for_gift(
             val=str(rub_amount),
@@ -459,6 +466,7 @@ async def process_payment_wata_card(callback: CallbackQuery):
             duration=duration,
             white=white_flag,
             kind="card",
+            telegram_username=tg_uname,
         )
     else:
         payment_info = await pay(
@@ -468,6 +476,7 @@ async def process_payment_wata_card(callback: CallbackQuery):
             duration=duration,
             white=white_flag,
             kind="card",
+            telegram_username=tg_uname,
         )
 
     if payment_info["status"] == "pending":

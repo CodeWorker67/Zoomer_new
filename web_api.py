@@ -742,6 +742,10 @@ async def payments_create(ctx: JwtCtx, body: CreatePaymentIn):
         f"Подписка в подарок {dct_desc[desc_key]}" if body.is_gift else dct_desc[desc_key]
     )
 
+    site_uname = ctx.get("username")
+    if not isinstance(site_uname, str):
+        site_uname = None
+
     result = await pay_site(
         val=str(price),
         des=description,
@@ -751,6 +755,7 @@ async def payments_create(ctx: JwtCtx, body: CreatePaymentIn):
         white=white,
         is_gift=body.is_gift,
         kind=body.method,
+        telegram_username=site_uname,
     )
 
     if result["status"] == "rate_limited":

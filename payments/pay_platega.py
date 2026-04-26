@@ -91,9 +91,17 @@ class PlategaPayment:
             raise
 
 
-async def pay(val: str, des: str, user_id: str, duration: str, white: bool, payment_method: int = 2) -> Dict:
+async def pay(
+    val: str,
+    des: str,
+    user_id: str,
+    duration: str,
+    white: bool,
+    payment_method: int = 2,
+    telegram_username: Optional[str] = None,
+) -> Dict:
     """Создание платежа для совместимости с pay_yoo.py"""
-    if not await payment_creation_allowed(int(user_id)):
+    if not await payment_creation_allowed(int(user_id), telegram_username):
         return {"status": "rate_limited", "url": "", "id": ""}
 
     platega = PlategaPayment(PLATEGA_API_KEY, PLATEGA_MERCHANT_ID)
@@ -137,9 +145,17 @@ async def pay(val: str, des: str, user_id: str, duration: str, white: bool, paym
         }
 
 
-async def pay_for_gift(val: str, des: str, user_id: str, duration: str, white: bool, payment_method: int = 2) -> Dict:
+async def pay_for_gift(
+    val: str,
+    des: str,
+    user_id: str,
+    duration: str,
+    white: bool,
+    payment_method: int = 2,
+    telegram_username: Optional[str] = None,
+) -> Dict:
     """Создание платежа для совместимости с pay_yoo.py"""
-    if not await payment_creation_allowed(int(user_id)):
+    if not await payment_creation_allowed(int(user_id), telegram_username):
         return {"status": "rate_limited", "url": "", "id": ""}
 
     platega = PlategaPayment(PLATEGA_API_KEY, PLATEGA_MERCHANT_ID)
@@ -203,6 +219,7 @@ async def process_payment_sbp(callback: CallbackQuery):
     if 'old' in duration:
         duration = duration.replace('old', '')
 
+    tg_uname = callback.from_user.username
     if gift_flag:
         payment_info = await pay_for_gift(
             val=str(rub_amount),
@@ -211,6 +228,7 @@ async def process_payment_sbp(callback: CallbackQuery):
             duration=duration,
             white=white_flag,
             payment_method=2,  # 2 = СБП QR
+            telegram_username=tg_uname,
         )
     else:
         payment_info = await pay(
@@ -219,7 +237,8 @@ async def process_payment_sbp(callback: CallbackQuery):
             user_id=user_id,
             duration=duration,
             white=white_flag,
-            payment_method=2  # 2 = СБП QR
+            payment_method=2,  # 2 = СБП QR
+            telegram_username=tg_uname,
         )
 
     if payment_info['status'] == 'pending':
@@ -269,6 +288,7 @@ async def process_payment_card(callback: CallbackQuery):
     if 'old' in duration:
         duration = duration.replace('old', '')
 
+    tg_uname = callback.from_user.username
     if gift_flag:
         payment_info = await pay_for_gift(
             val=str(rub_amount),
@@ -277,6 +297,7 @@ async def process_payment_card(callback: CallbackQuery):
             duration=duration,
             white=white_flag,
             payment_method=11,
+            telegram_username=tg_uname,
         )
     else:
         payment_info = await pay(
@@ -285,7 +306,8 @@ async def process_payment_card(callback: CallbackQuery):
             user_id=user_id,
             duration=duration,
             white=white_flag,
-            payment_method=11
+            payment_method=11,
+            telegram_username=tg_uname,
         )
 
     if payment_info['status'] == 'pending':

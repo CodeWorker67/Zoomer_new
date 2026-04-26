@@ -12,6 +12,7 @@ from openpyxl.styles import Alignment, Border, Side
 
 from bot import sql, x3
 from config import ADMIN_IDS
+from config_bd.models import Users
 from logging_config import logger
 from aiogram.types import Message, FSInputFile
 from aiogram.filters import Command
@@ -21,16 +22,56 @@ router = Router()
 # Полная видимость длинных полей (payload, transaction id, crypto-идентификаторы и т.п.) в Excel
 _EXCEL_COL_WIDTH_MAX = 255
 
+_USERS_EXPORT_COLUMNS_DEFAULT = (
+    "id",
+    "user_id",
+    "email",
+    "ref",
+    "is_delete",
+    "in_panel",
+    "is_connect",
+    "create_user",
+    "reserve_field",
+    "subscription_end_date",
+    "white_subscription_end_date",
+    "last_notification_date",
+    "last_broadcast_status",
+    "last_broadcast_date",
+    "stamp",
+    "ttclid",
+    "field_bool_3",
+)
 
-@router.message(Command(commands=['export']))
-async def export_database_to_excel(message: Message):
-    """Экспорт базы данных в Excel файл"""
+
+def _user_sheet_column_names(users_full_columns: bool) -> list[str]:
+    if users_full_columns:
+        return [c.key for c in Users.__table__.columns]
+    return list(_USERS_EXPORT_COLUMNS_DEFAULT)
+
+
+def _excel_scalar(value):
+    if value is None:
+        return value
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+    if isinstance(value, date):
+        return value.strftime("%Y-%m-%d")
+    return value
+
+
+async def _export_database_to_excel_impl(message: Message, *, users_full_columns: bool) -> None:
+    """Экспорт базы в Excel; при users_full_columns на листе users все колонки таблицы."""
     if message.from_user.id not in ADMIN_IDS:
         await message.answer("❌ Эта команда доступна только администраторам.")
         return
 
     try:
-        await message.answer("🔄 Начинаю экспорт базы данных...")
+        start_msg = (
+            "🔄 Начинаю экспорт базы данных (лист users — все колонки)..."
+            if users_full_columns
+            else "🔄 Начинаю экспорт базы данных..."
+        )
+        await message.answer(start_msg)
 
         snapshot = await sql.get_export_snapshot()
 
@@ -53,13 +94,7 @@ async def export_database_to_excel(message: Message):
 
             # --- Лист USERS ---
             ws_users = wb.create_sheet(title="users")
-            users_columns = [
-                'id', 'user_id', 'email', 'ref', 'is_delete', 'in_panel', 'is_connect',
-                'create_user', 'reserve_field', 'subscription_end_date',
-                'white_subscription_end_date', 'last_notification_date',
-                'last_broadcast_status', 'last_broadcast_date', 'stamp', 'ttclid',
-                'field_bool_3',
-            ]
+            users_columns = _user_sheet_column_names(users_full_columns)
             header_alignment = Alignment(horizontal="center", vertical="center")
             thin_border = Border(left=Side(style='thin'), right=Side(style='thin'),
                                  top=Side(style='thin'), bottom=Side(style='thin'))
@@ -72,22 +107,8 @@ async def export_database_to_excel(message: Message):
 
             # Данные
             for row_num, user in enumerate(users_list, 2):
-                row_data = [
-                    user.id, user.user_id, user.email, user.ref, user.is_delete,
-                    user.in_panel, user.is_connect, user.create_user,
-                    user.reserve_field, user.subscription_end_date,
-                    user.white_subscription_end_date, user.last_notification_date,
-                    user.last_broadcast_status, user.last_broadcast_date,
-                    user.stamp, user.ttclid, user.field_bool_3,
-                ]
+                row_data = [_excel_scalar(getattr(user, name)) for name in users_columns]
                 for col_num, value in enumerate(row_data, 1):
-                    # Форматирование дат
-                    if col_num in (10, 11, 14) and value:  # subscription_end_date, white_subscription_end_date, last_broadcast_date
-                        if isinstance(value, datetime):
-                            value = value.strftime('%Y-%m-%d %H:%M:%S')
-                    elif col_num == 12 and value:  # last_notification_date
-                        if isinstance(value, datetime):
-                            value = value.strftime('%Y-%m-%d')
                     cell = ws_users.cell(row=row_num, column=col_num, value=value)
                     cell.border = thin_border
 
@@ -420,8 +441,14 @@ async def export_database_to_excel(message: Message):
 
         try:
             now_s = datetime.now().strftime('%d.%m.%Y %H:%M')
+            users_sheet_note = (
+                "🧾 Лист <code>users</code>: все колонки таблицы.\n"
+                if users_full_columns
+                else ""
+            )
             caption = (
                 "📊 Экспорт базы данных\n"
+                f"{users_sheet_note}"
                 f"📅 Создано: {now_s}\n\n"
                 "📊 Статистика:\n"
                 f"├ 👥 Пользователей: {users_count}\n"
@@ -439,6 +466,7 @@ async def export_database_to_excel(message: Message):
             await message.answer_document(
                 document=FSInputFile(export_path),
                 caption=caption,
+                parse_mode="HTML",
             )
         finally:
             try:
@@ -446,13 +474,26 @@ async def export_database_to_excel(message: Message):
             except OSError:
                 pass
 
-        logger.info(f"Администратор {message.from_user.id} экспортировал базу данных в Excel")
+        suffix = " (export_full)" if users_full_columns else ""
+        logger.info(f"Администратор {message.from_user.id} экспортировал базу данных в Excel{suffix}")
 
     except Exception as e:
         error_message = f"❌ Ошибка при экспорте базы данных: {str(e)}"
         logger.error(error_message)
         logger.exception("Детали ошибки:")
         await message.answer(error_message)
+
+
+@router.message(Command(commands=["export"]))
+async def export_database_to_excel(message: Message):
+    """Экспорт базы данных в Excel файл."""
+    await _export_database_to_excel_impl(message, users_full_columns=False)
+
+
+@router.message(Command(commands=["export_full"]))
+async def export_full_database_to_excel(message: Message):
+    """Как /export, но лист users со всеми колонками таблицы users."""
+    await _export_database_to_excel_impl(message, users_full_columns=True)
 
 
 MSK = ZoneInfo("Europe/Moscow")

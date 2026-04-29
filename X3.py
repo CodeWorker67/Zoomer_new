@@ -200,7 +200,7 @@ class X3:
                 squad = random.choice([squad_1, squad_2])
                 traffic_limit_strategy = "NO_RESET"
                 traffic_limit_bytes = 0
-                hwid_device_limit = 3
+                hwid_device_limit = 5
 
             data = {
                 "username": panel_username,
@@ -319,7 +319,7 @@ class X3:
                 squad = random.choice([squad_1, squad_2])
                 trafficLimitStrategy = "NO_RESET"
                 trafficLimitBytes = 0
-                hwidDeviceLimit = 3
+                hwidDeviceLimit = 5
 
             data = {
                 "username": user_id_str,

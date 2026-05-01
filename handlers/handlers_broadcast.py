@@ -66,11 +66,11 @@ CUSTOM_PRESETS = [
     ("connect_vpn", "🔗 Подключить VPN", STYLE_PRIMARY),
     ("ref_invite", "Пригласить друзей🫶", STYLE_SUCCESS),
     ("buy_gift", "🎁 Подарить подписку", STYLE_SUCCESS),
-    ("r_7", "🤌 7 дней - 99 руб", STYLE_PRIMARY),
-    ("r_30", "🤝 30 дней - 179 руб", STYLE_PRIMARY),
-    ("r_90", "👌 90 дней - 369 руб", STYLE_SUCCESS),
-    ("r_120", "🔥 Акция: 120 дней - 369 руб", STYLE_SUCCESS),
-    ("r_180", "💪 180 дней - 699 руб", STYLE_SUCCESS),
+    ("r_7", "🤌 Неделя — 99 руб", STYLE_PRIMARY),
+    ("r_30", "🤝 30 дней — 249 руб", STYLE_PRIMARY),
+    ("r_90", "👌 90 дней — 539 руб (выгода −40%)", STYLE_SUCCESS),
+    ("r_120", "🔥 Акция: 120 дней — 539 руб", STYLE_SUCCESS),
+    ("r_180", "💪 180 дней — 999 руб (выгода −50%)", STYLE_SUCCESS),
     ("r_white_30", "🦾 Включи мобильный интернет - 399 руб", STYLE_PRIMARY),
 ]
 

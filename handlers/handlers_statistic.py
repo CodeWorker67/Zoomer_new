@@ -48,6 +48,7 @@ def convert_stars_to_rub(amount: int) -> Optional[int]:
         249: 249,
         539: 539,
         999: 999,
+        3490: 3490,
         199: 199,
         399: 399,
         # прежние суммы Stars → эквивалент в ₽ для отчётов
@@ -112,6 +113,8 @@ def _sync_build_analytics_excel(monthly_data: dict, daily_data_by_month: dict) -
         ('Сумма 539₽ (₽)', 'sum_539_amount'),
         ('Платежей 999₽ (шт)', 'sum_999_count'),
         ('Сумма 999₽ (₽)', 'sum_999_amount'),
+        ('Платежей 3490₽ (шт)', 'sum_3490_count'),
+        ('Сумма 3490₽ (₽)', 'sum_3490_amount'),
         ('Подарков (шт)', 'gift_count'),
         ('Сумма подарков (₽)', 'gift_amount'),
     ]
@@ -622,6 +625,7 @@ async def analytics_export(message: Message):
                 sum_249_count = sum_249_amount = 0
                 sum_539_count = sum_539_amount = 0
                 sum_999_count = sum_999_amount = 0
+                sum_3490_count = sum_3490_amount = 0
                 gift_count = gift_amount = 0
 
                 for amount, is_gift in all_payments:
@@ -641,6 +645,9 @@ async def analytics_export(message: Message):
                         elif amount in (999, 699, 499):
                             sum_999_count += 1
                             sum_999_amount += amount
+                        elif amount == 3490:
+                            sum_3490_count += 1
+                            sum_3490_amount += amount
 
                 monthly_data[month_key] = {
                     'new_total': len(new_total),
@@ -671,6 +678,8 @@ async def analytics_export(message: Message):
                     'sum_539_amount': sum_539_amount,
                     'sum_999_count': sum_999_count,
                     'sum_999_amount': sum_999_amount,
+                    'sum_3490_count': sum_3490_count,
+                    'sum_3490_amount': sum_3490_amount,
                     'gift_count': gift_count,
                     'gift_amount': gift_amount,
                 }

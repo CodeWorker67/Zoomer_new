@@ -53,7 +53,23 @@ def _billing_days_for_tariff_key(key: str) -> Optional[int]:
         return 180
     if key == "1000":
         return 1000
+    if key == "30secret":
+        return 30
     return None
+
+
+def _payload_duration_to_panel_days(raw: Optional[str]) -> Optional[int]:
+    """Значение duration из payload платежа → число дней для панели (30secret → 30)."""
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if s == "30secret":
+        return 30
+    try:
+        v = int(s)
+        return v if v > 0 else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _white_days_from_amount_fallback(amount: Any) -> Optional[int]:
@@ -740,6 +756,13 @@ class AsyncSQL:
             stmt = update(Users).where(Users.user_id == user_id).values(field_bool_3=value)
             await session.execute(stmt)
             await session.commit()
+
+    async def reset_field_bool_3_all(self) -> int:
+        """Всем строкам users: field_bool_3 = False. Возвращает число обновлённых записей."""
+        async with self.session_factory() as session:
+            result = await session.execute(update(Users).values(field_bool_3=False))
+            await session.commit()
+            return int(result.rowcount or 0)
 
     async def get_last_notification_date(self, user_id: int) -> Optional[date]:
         async with self.session_factory() as session:
@@ -1838,13 +1861,7 @@ class AsyncSQL:
                 return None
             if m.get("gift", "False").lower() == "true":
                 return None
-            d: Optional[int] = None
-            try:
-                di = int(m.get("duration", "0") or "0")
-                if di > 0:
-                    d = di
-            except ValueError:
-                pass
+            d = _payload_duration_to_panel_days(m.get("duration"))
             if d is not None:
                 return d
             return _billing_duration_from_amount_fallback(amt_f)
@@ -2033,13 +2050,7 @@ class AsyncSQL:
             m = _parse_map(payload)
             white = m.get("white", "False").lower() == "true"
             gift = bool(is_gift) or m.get("gift", "False").lower() == "true"
-            dur: Optional[int] = None
-            try:
-                di = int(m.get("duration", "0") or "0")
-                if di > 0:
-                    dur = di
-            except ValueError:
-                pass
+            dur = _payload_duration_to_panel_days(m.get("duration"))
             if dur is None:
                 try:
                     amt_f = float(amount)

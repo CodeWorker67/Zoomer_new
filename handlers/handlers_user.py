@@ -20,6 +20,14 @@ _TRIAL_RETURN_GET_CB = "trial_return_get"
 # индекс field_bool_3 в кортеже get_user (_user_tuple)
 _USER_TUPLE_FIELD_BOOL_3 = 26
 
+_SECRET_TARIFF_PAYMENT_TEXT = (
+    "Секретный тариф - 💫 подписка на VPN PRO\n"
+    "4 сервера из разных стран на выбор.\n"
+    "5 устройств, безлимитный трафик.\n\n"
+    "СКИДКА 40% - 149 руб за месяц\n\n"
+    "Выберите способ оплаты:"
+)
+
 _LINKING_CODE_TEXT = re.compile(r"^[A-Za-z0-9]{8}$")
 
 
@@ -177,34 +185,54 @@ async def direct_connect_vpn_cb(callback: CallbackQuery):
     await callback.answer()
 
 
-@router.callback_query(F.data == _TRIAL_RETURN_GET_CB)
-async def trial_return_get_cb(callback: CallbackQuery):
+# @router.callback_query(F.data == _TRIAL_RETURN_GET_CB)
+# async def trial_return_get_cb(callback: CallbackQuery):
+#     uid = callback.from_user.id
+#     user_data = await sql.get_user(uid)
+#     if user_data is None:
+#         await callback.answer("Сначала нажмите /start в боте.", show_alert=True)
+#         return
+
+#     if user_data[_USER_TUPLE_FIELD_BOOL_3]:
+#         await callback.answer("Вы уже взяли свой триал!", show_alert=True)
+#         return
+
+#     await callback.answer()
+#     ok = await x3.updateClient(7, str(uid), uid)
+#     if not ok:
+#         await callback.message.answer(
+#             "Не удалось начислить дни. Попробуйте позже или напишите в поддержку."
+#         )
+#         return
+
+#     await sql.update_field_bool_3(uid, True)
+#     await callback.message.answer(
+#         "🎉 Поздравляем! Вы получили 7 триальных дней доступа к ВПН! ✨🔐",
+#         reply_markup=create_kb(
+#             1,
+#             styles={"connect_vpn": STYLE_PRIMARY},
+#             connect_vpn="🔗 Подключить VPN",
+#         ),
+#     )
+
+
+@router.callback_query(F.data == "r_30secret")
+async def secret_tariff_payment(callback: CallbackQuery):
     uid = callback.from_user.id
     user_data = await sql.get_user(uid)
     if user_data is None:
-        await callback.answer("Сначала нажмите /start в боте.", show_alert=True)
-        return
-
-    if user_data[_USER_TUPLE_FIELD_BOOL_3]:
-        await callback.answer("Вы уже взяли свой триал!", show_alert=True)
-        return
-
-    await callback.answer()
-    ok = await x3.updateClient(7, str(uid), uid)
-    if not ok:
-        await callback.message.answer(
-            "Не удалось начислить дни. Попробуйте позже или напишите в поддержку."
+        await sql.add_user(uid, False)
+        user_data = await sql.get_user(uid)
+    if user_data is not None and user_data[_USER_TUPLE_FIELD_BOOL_3]:
+        await callback.answer(
+            "Вы уже воспользовались секретным тарифом!",
+            show_alert=True,
         )
         return
-
-    await sql.update_field_bool_3(uid, True)
+    await callback.answer()
     await callback.message.answer(
-        "🎉 Поздравляем! Вы получили 7 триальных дней доступа к ВПН! ✨🔐",
-        reply_markup=create_kb(
-            1,
-            styles={"connect_vpn": STYLE_PRIMARY},
-            connect_vpn="🔗 Подключить VPN",
-        ),
+        _SECRET_TARIFF_PAYMENT_TEXT,
+        reply_markup=keyboard_payment_method("r_30secret"),
     )
 
 

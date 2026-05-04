@@ -73,6 +73,7 @@ CUSTOM_PRESETS = [
     ("r_180", "💪 180 дней — 999 руб (выгода −50%)", STYLE_SUCCESS),
     ("r_1000", "♾️ Навсегда — 3490 руб", STYLE_SUCCESS),
     ("r_white_30", "🦾 Включи мобильный интернет - 399 руб", STYLE_PRIMARY),
+    ("r_30secret", "🔒 СЕКРЕТНЫЙ ТАРИФ", STYLE_DANGER),
 ]
 
 

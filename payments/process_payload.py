@@ -3,7 +3,7 @@ from typing import Optional, Tuple
 
 from bot import x3, sql, bot
 
-from config_bd.utils import _norm_email
+from config_bd.utils import _norm_email, _payload_duration_to_panel_days
 from X3 import panel_username_for_site_user
 from keyboard import create_kb, keyboard_sub_after_buy
 from lexicon import lexicon
@@ -96,7 +96,12 @@ async def process_confirmed_payment(payload):
     try:
         payload_parts = dict(item.split(":", 1) for item in payload.split(","))
         raw_uid = payload_parts.get("user_id", "0")
-        duration = int(payload_parts.get("duration", 0))
+        raw_duration = str(payload_parts.get("duration", "0") or "0").strip()
+        duration = _payload_duration_to_panel_days(raw_duration)
+        secret_tariff = raw_duration == "30secret"
+        if duration is None or duration <= 0:
+            logger.error("Платёж: некорректный duration в payload: {}", raw_duration)
+            return
         white_flag = payload_parts.get("white", "False") == "True"
         is_gift = payload_parts.get("gift", "False") == "True"
         method = payload_parts.get("method", "")
@@ -106,9 +111,10 @@ async def process_confirmed_payment(payload):
             amount = float(payload_parts.get("amount", 0.0))
 
         logger.info(
-            "Обработка подтвержденного платежа user={} duration={} white={} gift={} method={} amount={}",
+            "Обработка подтвержденного платежа user={} duration={} secret={} white={} gift={} method={} amount={}",
             raw_uid,
             duration,
+            secret_tariff,
             white_flag,
             is_gift,
             method,
@@ -256,6 +262,8 @@ async def process_confirmed_payment(payload):
             else:
                 await sql.add_user(db_uid, True)
             await sql.update_reserve_field(db_uid)
+            if secret_tariff and not is_gift:
+                await sql.update_field_bool_3(db_uid, True)
 
             if notify_tg is not None and notify_tg > 0:
                 try:

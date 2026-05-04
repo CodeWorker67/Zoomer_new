@@ -874,368 +874,378 @@ async def check_users_command(message: Message):
     await message.answer('Все юзеры разблокированы')
 
 
-@router.message(Command(commands=['add_7_to_connected']))
-async def add_7_to_connected_command(message: Message):
-    """
-    Пользователи с активной white-подпиской (календарная дата окончания ≥ сегодня по UTC): +7 дней в панель и БД,
-    затем по кнопке — уведомление в ЛС (только после успешного обновления панели).
-    """
+@router.message(Command(commands=['reset_bool3']))
+async def reset_field_bool_3_all_command(message: Message):
+    """Сброс field_bool_3 у всех пользователей (триал / одноразовые акции)."""
     if message.from_user.id not in ADMIN_IDS:
         return
-
-    user_ids = await sql.SELECT_USER_IDS_ACTIVE_WHITE_SUBSCRIPTION()
-    n = len(user_ids)
-    if not user_ids:
-        await message.answer(
-            "Нет пользователей с активной white-подпиской "
-            "(дата окончания по UTC ≥ сегодняшнего дня UTC)."
-        )
-        return
-
-    kb = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="▶️ Начать отправку",
-                    callback_data=_ADD7WHITE_CB,
-                    style=STYLE_SUCCESS,
-                )
-            ]
-        ]
-    )
-    await message.answer(
-        f"Будет обработано пользователей: {n}\n"
-        f"(дата окончания white в БД по UTC ≥ сегодняшнего дня UTC).\n\n"
-        f"Для каждого: +7 дней в панели и БД, затем сообщение в Telegram "
-        f"(если обновление панели прошло успешно).",
-        reply_markup=kb,
-    )
+    n = await sql.reset_field_bool_3_all()
+    await message.answer(f"Готово: field_bool_3 = false у {n} записей в users.")
+    logger.info(f"Админ {message.from_user.id}: сброс field_bool_3 для всех, обновлено строк: {n}")
 
 
-@router.callback_query(F.data == _ADD7WHITE_CB)
-async def add_7_to_connected_confirm(callback: CallbackQuery):
-    if callback.from_user.id not in ADMIN_IDS:
-        await callback.answer("Нет доступа.", show_alert=True)
-        return
+# @router.message(Command(commands=['add_7_to_connected']))
+# async def add_7_to_connected_command(message: Message):
+#     """
+#     Пользователи с активной white-подпиской (календарная дата окончания ≥ сегодня по UTC): +7 дней в панель и БД,
+#     затем по кнопке — уведомление в ЛС (только после успешного обновления панели).
+#     """
+#     if message.from_user.id not in ADMIN_IDS:
+#         return
 
-    await callback.answer()
-    user_ids = await sql.SELECT_USER_IDS_ACTIVE_WHITE_SUBSCRIPTION()
-    if not user_ids:
-        await callback.message.edit_text(
-            "Список пуст (условия уже не выполняются). Повторите /add_7_to_connected."
-        )
-        return
+#     user_ids = await sql.SELECT_USER_IDS_ACTIVE_WHITE_SUBSCRIPTION()
+#     n = len(user_ids)
+#     if not user_ids:
+#         await message.answer(
+#             "Нет пользователей с активной white-подпиской "
+#             "(дата окончания по UTC ≥ сегодняшнего дня UTC)."
+#         )
+#         return
 
-    await callback.message.edit_text(
-        f"⏳ Обработка {len(user_ids)} пользователей…"
-    )
-
-    panel_ok = 0
-    panel_fail = 0
-    msg_ok = 0
-    msg_fail = 0
-    skipped_chat = 0
-
-    for user_id in user_ids:
-        username_panel = f"{user_id}_white"
-        ok = await x3.updateClient(7, username_panel, user_id)
-        if not ok:
-            panel_fail += 1
-            logger.warning(
-                "add_7_to_connected: панель не обновлена user_id=%s", user_id
-            )
-        else:
-            panel_ok += 1
-            if is_telegram_chat_id(user_id):
-                try:
-                    await bot.send_message(user_id, _ADD7WHITE_USER_TEXT)
-                    msg_ok += 1
-                except Exception as e:
-                    msg_fail += 1
-                    logger.warning(
-                        "add_7_to_connected: не отправлено user_id=%s: %s",
-                        user_id,
-                        e,
-                    )
-            else:
-                skipped_chat += 1
-
-        await asyncio.sleep(0.1)
-
-    await callback.message.answer(
-        "Готово.\n"
-        f"• Панель + БД: успешно {panel_ok}, ошибок {panel_fail}\n"
-        f"• Сообщения в TG: отправлено {msg_ok}, ошибок {msg_fail}\n"
-        f"• Пропущено (не Telegram chat_id): {skipped_chat}"
-    )
+#     kb = InlineKeyboardMarkup(
+#         inline_keyboard=[
+#             [
+#                 InlineKeyboardButton(
+#                     text="▶️ Начать отправку",
+#                     callback_data=_ADD7WHITE_CB,
+#                     style=STYLE_SUCCESS,
+#                 )
+#             ]
+#         ]
+#     )
+#     await message.answer(
+#         f"Будет обработано пользователей: {n}\n"
+#         f"(дата окончания white в БД по UTC ≥ сегодняшнего дня UTC).\n\n"
+#         f"Для каждого: +7 дней в панели и БД, затем сообщение в Telegram "
+#         f"(если обновление панели прошло успешно).",
+#         reply_markup=kb,
+#     )
 
 
-@router.message(Command(commands=['add_7_subscribed']))
-async def add_7_subscribed_command(message: Message):
-    """
-    Пользователи с активной обычной подпиской (календарная дата окончания ≥ сегодня по UTC): +7 дней в панель и БД,
-    затем по кнопке — уведомление в ЛС (только после успешного обновления панели).
-    """
-    if message.from_user.id not in ADMIN_IDS:
-        return
+# @router.callback_query(F.data == _ADD7WHITE_CB)
+# async def add_7_to_connected_confirm(callback: CallbackQuery):
+#     if callback.from_user.id not in ADMIN_IDS:
+#         await callback.answer("Нет доступа.", show_alert=True)
+#         return
 
-    user_ids = await sql.SELECT_USER_IDS_ACTIVE_SUBSCRIPTION()
-    n = len(user_ids)
-    if not user_ids:
-        await message.answer(
-            "Нет пользователей с активной обычной подпиской "
-            "(дата окончания по UTC ≥ сегодняшнего дня UTC)."
-        )
-        return
+#     await callback.answer()
+#     user_ids = await sql.SELECT_USER_IDS_ACTIVE_WHITE_SUBSCRIPTION()
+#     if not user_ids:
+#         await callback.message.edit_text(
+#             "Список пуст (условия уже не выполняются). Повторите /add_7_to_connected."
+#         )
+#         return
 
-    kb = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="▶️ Начать отправку",
-                    callback_data=_ADD7REG_CB,
-                    style=STYLE_SUCCESS,
-                )
-            ]
-        ]
-    )
-    await message.answer(
-        f"Будет обработано пользователей: {n}\n"
-        f"(дата окончания обычной подписки в БД по UTC ≥ сегодняшнего дня UTC).\n\n"
-        f"Для каждого: +7 дней в панели и БД, затем сообщение в Telegram "
-        f"(если обновление панели прошло успешно).",
-        reply_markup=kb,
-    )
+#     await callback.message.edit_text(
+#         f"⏳ Обработка {len(user_ids)} пользователей…"
+#     )
 
+#     panel_ok = 0
+#     panel_fail = 0
+#     msg_ok = 0
+#     msg_fail = 0
+#     skipped_chat = 0
 
-@router.callback_query(F.data == _ADD7REG_CB)
-async def add_7_subscribed_confirm(callback: CallbackQuery):
-    if callback.from_user.id not in ADMIN_IDS:
-        await callback.answer("Нет доступа.", show_alert=True)
-        return
+#     for user_id in user_ids:
+#         username_panel = f"{user_id}_white"
+#         ok = await x3.updateClient(7, username_panel, user_id)
+#         if not ok:
+#             panel_fail += 1
+#             logger.warning(
+#                 "add_7_to_connected: панель не обновлена user_id=%s", user_id
+#             )
+#         else:
+#             panel_ok += 1
+#             if is_telegram_chat_id(user_id):
+#                 try:
+#                     await bot.send_message(user_id, _ADD7WHITE_USER_TEXT)
+#                     msg_ok += 1
+#                 except Exception as e:
+#                     msg_fail += 1
+#                     logger.warning(
+#                         "add_7_to_connected: не отправлено user_id=%s: %s",
+#                         user_id,
+#                         e,
+#                     )
+#             else:
+#                 skipped_chat += 1
 
-    await callback.answer()
-    user_ids = await sql.SELECT_USER_IDS_ACTIVE_SUBSCRIPTION()
-    if not user_ids:
-        await callback.message.edit_text(
-            "Список пуст (условия уже не выполняются). Повторите /add_7_subscribed."
-        )
-        return
+#         await asyncio.sleep(0.1)
 
-    await callback.message.edit_text(
-        f"⏳ Обработка {len(user_ids)} пользователей (обычная подписка)…"
-    )
-
-    admin_chat_id = callback.message.chat.id
-    panel_ok = 0
-    panel_fail = 0
-    msg_ok = 0
-    msg_fail = 0
-    skipped_chat = 0
-    processed = 0
-
-    for user_id in user_ids:
-        # Только обычная подписка: список из subscription_end_date (не white),
-        # в панели username = telegram id без суффикса _white → updateClient пишет subscription_end_date.
-        username_panel = str(user_id)
-        ok = await x3.updateClient(7, username_panel, user_id)
-        if not ok:
-            panel_fail += 1
-            logger.warning(
-                "add_7_subscribed: панель не обновлена user_id=%s", user_id
-            )
-        else:
-            panel_ok += 1
-            if is_telegram_chat_id(user_id):
-                try:
-                    await bot.send_message(user_id, _ADD7REG_USER_TEXT)
-                    msg_ok += 1
-                except Exception as e:
-                    msg_fail += 1
-                    logger.warning(
-                        "add_7_subscribed: не отправлено user_id=%s: %s",
-                        user_id,
-                        e,
-                    )
-            else:
-                skipped_chat += 1
-
-        processed += 1
-        if processed % 1000 == 0:
-            try:
-                await bot.send_message(
-                    admin_chat_id,
-                    f"add_7_subscribed: обработано пользователей — {processed}",
-                )
-            except Exception as notify_err:
-                logger.warning(
-                    "add_7_subscribed: не удалось отправить прогресс админу: %s",
-                    notify_err,
-                )
-
-        await asyncio.sleep(0.1)
-
-    await callback.message.answer(
-        "Готово (обычная подписка).\n"
-        f"• Панель + БД: успешно {panel_ok}, ошибок {panel_fail}\n"
-        f"• Сообщения в TG: отправлено {msg_ok}, ошибок {msg_fail}\n"
-        f"• Пропущено (не Telegram chat_id): {skipped_chat}"
-    )
+#     await callback.message.answer(
+#         "Готово.\n"
+#         f"• Панель + БД: успешно {panel_ok}, ошибок {panel_fail}\n"
+#         f"• Сообщения в TG: отправлено {msg_ok}, ошибок {msg_fail}\n"
+#         f"• Пропущено (не Telegram chat_id): {skipped_chat}"
+#     )
 
 
-@router.message(Command(commands=['add_7_to_all']))
-async def add_7_to_all_command(message: Message):
-    """
-    Рассылка: в панели, обычная подписка истекла (дата UTC), is_delete=False.
-    Кнопка «ТРИАЛ»; +7 дней по нажатию, флаг field_bool_3 (handlers_user).
-    """
-    if message.from_user.id not in ADMIN_IDS:
-        return
+# @router.message(Command(commands=['add_7_subscribed']))
+# async def add_7_subscribed_command(message: Message):
+#     """
+#     Пользователи с активной обычной подпиской (календарная дата окончания ≥ сегодня по UTC): +7 дней в панель и БД,
+#     затем по кнопке — уведомление в ЛС (только после успешного обновления панели).
+#     """
+#     if message.from_user.id not in ADMIN_IDS:
+#         return
 
-    user_ids = await sql.SELECT_USER_IDS_PANEL_EXPIRED_REGULAR_SUBSCRIPTION()
-    n = len(user_ids)
-    if not user_ids:
-        await message.answer(
-            "Нет пользователей: in_panel, не удалены, обычная подписка истекла по дате UTC "
-            "(или subscription_end_date пусто)."
-        )
-        return
+#     user_ids = await sql.SELECT_USER_IDS_ACTIVE_SUBSCRIPTION()
+#     n = len(user_ids)
+#     if not user_ids:
+#         await message.answer(
+#             "Нет пользователей с активной обычной подпиской "
+#             "(дата окончания по UTC ≥ сегодняшнего дня UTC)."
+#         )
+#         return
 
-    kb = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="▶️ Превью и подтверждение",
-                    callback_data=_ADD7ALL_PREVIEW_CB,
-                    style=STYLE_SUCCESS,
-                )
-            ]
-        ]
-    )
-    await message.answer(
-        f"К получателям рассылки: {n} чел.\n"
-        f"(в панели, is_delete=False, подписка не активна по календарной дате UTC).\n\n"
-        f"Дальше бот пришлёт вам превью текста с кнопкой «🔥Получить ТРИАЛ» и запрос подтверждения.\n"
-        f"Начисление +7 дней у пользователей — только по нажатию (field_bool_3).",
-        reply_markup=kb,
-    )
-
-
-@router.callback_query(F.data == _ADD7ALL_PREVIEW_CB)
-async def add_7_to_all_preview(callback: CallbackQuery):
-    if callback.from_user.id not in ADMIN_IDS:
-        await callback.answer("Нет доступа.", show_alert=True)
-        return
-
-    await callback.answer()
-    user_ids = await sql.SELECT_USER_IDS_PANEL_EXPIRED_REGULAR_SUBSCRIPTION()
-    n = len(user_ids)
-    if not user_ids:
-        await callback.message.edit_text("Список пуст. Повторите /add_7_to_all.")
-        return
-
-    chat_id = callback.message.chat.id
-    await callback.message.edit_text(
-        "Ниже — превью рассылки и кнопка подтверждения отправки пользователям."
-    )
-
-    await bot.send_message(
-        chat_id,
-        _ADD7ALL_PROMO_TEXT,
-        reply_markup=_ADD7ALL_TRIAL_KB,
-    )
-
-    confirm_kb = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="Да",
-                    callback_data=_ADD7ALL_YES_CB,
-                    style=STYLE_SUCCESS,
-                ),
-                InlineKeyboardButton(
-                    text="Нет",
-                    callback_data=_ADD7ALL_NO_CB,
-                    style=STYLE_DANGER,
-                ),
-            ]
-        ]
-    )
-    await bot.send_message(
-        chat_id,
-        f"Человек в рассылке — {n}. Подтвердите отправку.",
-        reply_markup=confirm_kb,
-    )
+#     kb = InlineKeyboardMarkup(
+#         inline_keyboard=[
+#             [
+#                 InlineKeyboardButton(
+#                     text="▶️ Начать отправку",
+#                     callback_data=_ADD7REG_CB,
+#                     style=STYLE_SUCCESS,
+#                 )
+#             ]
+#         ]
+#     )
+#     await message.answer(
+#         f"Будет обработано пользователей: {n}\n"
+#         f"(дата окончания обычной подписки в БД по UTC ≥ сегодняшнего дня UTC).\n\n"
+#         f"Для каждого: +7 дней в панели и БД, затем сообщение в Telegram "
+#         f"(если обновление панели прошло успешно).",
+#         reply_markup=kb,
+#     )
 
 
-@router.callback_query(F.data == _ADD7ALL_NO_CB)
-async def add_7_to_all_cancel(callback: CallbackQuery):
-    if callback.from_user.id not in ADMIN_IDS:
-        await callback.answer("Нет доступа.", show_alert=True)
-        return
-    await callback.answer()
-    await callback.message.edit_text(
-        "Отправка рассылки add_7_to_all отменена.",
-        reply_markup=None,
-    )
+# @router.callback_query(F.data == _ADD7REG_CB)
+# async def add_7_subscribed_confirm(callback: CallbackQuery):
+#     if callback.from_user.id not in ADMIN_IDS:
+#         await callback.answer("Нет доступа.", show_alert=True)
+#         return
+
+#     await callback.answer()
+#     user_ids = await sql.SELECT_USER_IDS_ACTIVE_SUBSCRIPTION()
+#     if not user_ids:
+#         await callback.message.edit_text(
+#             "Список пуст (условия уже не выполняются). Повторите /add_7_subscribed."
+#         )
+#         return
+
+#     await callback.message.edit_text(
+#         f"⏳ Обработка {len(user_ids)} пользователей (обычная подписка)…"
+#     )
+
+#     admin_chat_id = callback.message.chat.id
+#     panel_ok = 0
+#     panel_fail = 0
+#     msg_ok = 0
+#     msg_fail = 0
+#     skipped_chat = 0
+#     processed = 0
+
+#     for user_id in user_ids:
+#         # Только обычная подписка: список из subscription_end_date (не white),
+#         # в панели username = telegram id без суффикса _white → updateClient пишет subscription_end_date.
+#         username_panel = str(user_id)
+#         ok = await x3.updateClient(7, username_panel, user_id)
+#         if not ok:
+#             panel_fail += 1
+#             logger.warning(
+#                 "add_7_subscribed: панель не обновлена user_id=%s", user_id
+#             )
+#         else:
+#             panel_ok += 1
+#             if is_telegram_chat_id(user_id):
+#                 try:
+#                     await bot.send_message(user_id, _ADD7REG_USER_TEXT)
+#                     msg_ok += 1
+#                 except Exception as e:
+#                     msg_fail += 1
+#                     logger.warning(
+#                         "add_7_subscribed: не отправлено user_id=%s: %s",
+#                         user_id,
+#                         e,
+#                     )
+#             else:
+#                 skipped_chat += 1
+
+#         processed += 1
+#         if processed % 1000 == 0:
+#             try:
+#                 await bot.send_message(
+#                     admin_chat_id,
+#                     f"add_7_subscribed: обработано пользователей — {processed}",
+#                 )
+#             except Exception as notify_err:
+#                 logger.warning(
+#                     "add_7_subscribed: не удалось отправить прогресс админу: %s",
+#                     notify_err,
+#                 )
+
+#         await asyncio.sleep(0.1)
+
+#     await callback.message.answer(
+#         "Готово (обычная подписка).\n"
+#         f"• Панель + БД: успешно {panel_ok}, ошибок {panel_fail}\n"
+#         f"• Сообщения в TG: отправлено {msg_ok}, ошибок {msg_fail}\n"
+#         f"• Пропущено (не Telegram chat_id): {skipped_chat}"
+#     )
 
 
-@router.callback_query(F.data == _ADD7ALL_YES_CB)
-async def add_7_to_all_confirm(callback: CallbackQuery):
-    if callback.from_user.id not in ADMIN_IDS:
-        await callback.answer("Нет доступа.", show_alert=True)
-        return
+# @router.message(Command(commands=['add_7_to_all']))
+# async def add_7_to_all_command(message: Message):
+#     """
+#     Рассылка: в панели, обычная подписка истекла (дата UTC), is_delete=False.
+#     Кнопка «ТРИАЛ»; +7 дней по нажатию, флаг field_bool_3 (handlers_user).
+#     """
+#     if message.from_user.id not in ADMIN_IDS:
+#         return
 
-    await callback.answer()
-    user_ids = await sql.SELECT_USER_IDS_PANEL_EXPIRED_REGULAR_SUBSCRIPTION()
-    if not user_ids:
-        await callback.message.edit_text("Список пуст. Повторите /add_7_to_all.")
-        return
+#     user_ids = await sql.SELECT_USER_IDS_PANEL_EXPIRED_REGULAR_SUBSCRIPTION()
+#     n = len(user_ids)
+#     if not user_ids:
+#         await message.answer(
+#             "Нет пользователей: in_panel, не удалены, обычная подписка истекла по дате UTC "
+#             "(или subscription_end_date пусто)."
+#         )
+#         return
 
-    await callback.message.edit_text(
-        f"⏳ Рассылка add_7_to_all: {len(user_ids)} получателей…"
-    )
+#     kb = InlineKeyboardMarkup(
+#         inline_keyboard=[
+#             [
+#                 InlineKeyboardButton(
+#                     text="▶️ Превью и подтверждение",
+#                     callback_data=_ADD7ALL_PREVIEW_CB,
+#                     style=STYLE_SUCCESS,
+#                 )
+#             ]
+#         ]
+#     )
+#     await message.answer(
+#         f"К получателям рассылки: {n} чел.\n"
+#         f"(в панели, is_delete=False, подписка не активна по календарной дате UTC).\n\n"
+#         f"Дальше бот пришлёт вам превью текста с кнопкой «🔥Получить ТРИАЛ» и запрос подтверждения.\n"
+#         f"Начисление +7 дней у пользователей — только по нажатию (field_bool_3).",
+#         reply_markup=kb,
+#     )
 
-    admin_chat_id = callback.message.chat.id
-    sent = 0
-    failed = 0
-    skipped_non_tg = 0
 
-    for user_id in user_ids[10000:]:
-        if not is_telegram_chat_id(user_id):
-            skipped_non_tg += 1
-            await asyncio.sleep(0.1)
-            continue
-        try:
-            await bot.send_message(
-                user_id,
-                _ADD7ALL_PROMO_TEXT,
-                reply_markup=_ADD7ALL_TRIAL_KB,
-            )
-            sent += 1
-            if sent % 1000 == 0:
-                try:
-                    await bot.send_message(
-                        admin_chat_id,
-                        f"add_7_to_all: отправлено сообщений — {sent}",
-                    )
-                except Exception as notify_err:
-                    logger.warning(
-                        "add_7_to_all: не удалось отправить прогресс админу: %s",
-                        notify_err,
-                    )
-        except Exception as e:
-            failed += 1
-            logger.warning("add_7_to_all: не отправлено user_id=%s: %s", user_id, e)
+# @router.callback_query(F.data == _ADD7ALL_PREVIEW_CB)
+# async def add_7_to_all_preview(callback: CallbackQuery):
+#     if callback.from_user.id not in ADMIN_IDS:
+#         await callback.answer("Нет доступа.", show_alert=True)
+#         return
 
-        await asyncio.sleep(0.1)
+#     await callback.answer()
+#     user_ids = await sql.SELECT_USER_IDS_PANEL_EXPIRED_REGULAR_SUBSCRIPTION()
+#     n = len(user_ids)
+#     if not user_ids:
+#         await callback.message.edit_text("Список пуст. Повторите /add_7_to_all.")
+#         return
 
-    await callback.message.answer(
-        "Готово (add_7_to_all).\n"
-        f"• Отправлено: {sent}\n"
-        f"• Ошибок: {failed}\n"
-        f"• Пропущено (не Telegram chat_id): {skipped_non_tg}"
-    )
+#     chat_id = callback.message.chat.id
+#     await callback.message.edit_text(
+#         "Ниже — превью рассылки и кнопка подтверждения отправки пользователям."
+#     )
+
+#     await bot.send_message(
+#         chat_id,
+#         _ADD7ALL_PROMO_TEXT,
+#         reply_markup=_ADD7ALL_TRIAL_KB,
+#     )
+
+#     confirm_kb = InlineKeyboardMarkup(
+#         inline_keyboard=[
+#             [
+#                 InlineKeyboardButton(
+#                     text="Да",
+#                     callback_data=_ADD7ALL_YES_CB,
+#                     style=STYLE_SUCCESS,
+#                 ),
+#                 InlineKeyboardButton(
+#                     text="Нет",
+#                     callback_data=_ADD7ALL_NO_CB,
+#                     style=STYLE_DANGER,
+#                 ),
+#             ]
+#         ]
+#     )
+#     await bot.send_message(
+#         chat_id,
+#         f"Человек в рассылке — {n}. Подтвердите отправку.",
+#         reply_markup=confirm_kb,
+#     )
+
+
+# @router.callback_query(F.data == _ADD7ALL_NO_CB)
+# async def add_7_to_all_cancel(callback: CallbackQuery):
+#     if callback.from_user.id not in ADMIN_IDS:
+#         await callback.answer("Нет доступа.", show_alert=True)
+#         return
+#     await callback.answer()
+#     await callback.message.edit_text(
+#         "Отправка рассылки add_7_to_all отменена.",
+#         reply_markup=None,
+#     )
+
+
+# @router.callback_query(F.data == _ADD7ALL_YES_CB)
+# async def add_7_to_all_confirm(callback: CallbackQuery):
+#     if callback.from_user.id not in ADMIN_IDS:
+#         await callback.answer("Нет доступа.", show_alert=True)
+#         return
+
+#     await callback.answer()
+#     user_ids = await sql.SELECT_USER_IDS_PANEL_EXPIRED_REGULAR_SUBSCRIPTION()
+#     if not user_ids:
+#         await callback.message.edit_text("Список пуст. Повторите /add_7_to_all.")
+#         return
+
+#     await callback.message.edit_text(
+#         f"⏳ Рассылка add_7_to_all: {len(user_ids)} получателей…"
+#     )
+
+#     admin_chat_id = callback.message.chat.id
+#     sent = 0
+#     failed = 0
+#     skipped_non_tg = 0
+
+#     for user_id in user_ids[10000:]:
+#         if not is_telegram_chat_id(user_id):
+#             skipped_non_tg += 1
+#             await asyncio.sleep(0.1)
+#             continue
+#         try:
+#             await bot.send_message(
+#                 user_id,
+#                 _ADD7ALL_PROMO_TEXT,
+#                 reply_markup=_ADD7ALL_TRIAL_KB,
+#             )
+#             sent += 1
+#             if sent % 1000 == 0:
+#                 try:
+#                     await bot.send_message(
+#                         admin_chat_id,
+#                         f"add_7_to_all: отправлено сообщений — {sent}",
+#                     )
+#                 except Exception as notify_err:
+#                     logger.warning(
+#                         "add_7_to_all: не удалось отправить прогресс админу: %s",
+#                         notify_err,
+#                     )
+#         except Exception as e:
+#             failed += 1
+#             logger.warning("add_7_to_all: не отправлено user_id=%s: %s", user_id, e)
+
+#         await asyncio.sleep(0.1)
+
+#     await callback.message.answer(
+#         "Готово (add_7_to_all).\n"
+#         f"• Отправлено: {sent}\n"
+#         f"• Ошибок: {failed}\n"
+#         f"• Пропущено (не Telegram chat_id): {skipped_non_tg}"
+#     )
 
 
 @router.message(Command(commands=['send_push']))

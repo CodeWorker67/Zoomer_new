@@ -1329,6 +1329,19 @@ class AsyncSQL:
             await session.execute(stmt)
             await session.commit()
 
+    async def claim_broadcast_trial(self, user_id: int) -> bool:
+        """Атомарно резервирует broadcast-триал (field_bool_3). True — только у одного параллельного запроса."""
+        await self.add_user(user_id, False)
+        async with self.session_factory() as session:
+            stmt = (
+                update(Users)
+                .where(Users.user_id == user_id, Users.field_bool_3.is_(False))
+                .values(field_bool_3=True)
+            )
+            result = await session.execute(stmt)
+            await session.commit()
+            return int(result.rowcount or 0) > 0
+
     async def reset_field_bool_3_all(self) -> int:
         """Всем строкам users: field_bool_3 = False. Возвращает число обновлённых записей."""
         async with self.session_factory() as session:

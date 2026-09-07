@@ -494,26 +494,10 @@ async def free_vpn_cb(callback: CallbackQuery):
     await post_user_trial(uid)
 
 
-async def _trial_already_used(uid: int) -> bool:
-    user_data = await sql.get_user(uid)
-    if user_data is None:
-        await sql.add_user(uid, False)
-        user_data = await sql.get_user(uid)
-    return (
-        user_data is not None
-        and len(user_data) > _USER_TUPLE_FIELD_BOOL_3
-        and user_data[_USER_TUPLE_FIELD_BOOL_3]
-    )
-
 
 async def _issue_broadcast_trial(callback: CallbackQuery) -> bool:
     uid = callback.from_user.id
     days = _BROADCAST_TRIAL_DAYS
-
-    if await sql.get_user(uid) is None:
-        await sql.add_user(uid, False)
-
-    await sql.update_field_bool_3(uid, True)
 
     user_id_str = str(uid)
     existing_user = await x3.get_user_by_username(user_id_str)
@@ -578,7 +562,8 @@ async def _issue_broadcast_trial(callback: CallbackQuery) -> bool:
 
 @router.callback_query(F.data == 'get_trial')
 async def get_trial_cb(callback: CallbackQuery):
-    if await _trial_already_used(callback.from_user.id):
+    uid = callback.from_user.id
+    if not await sql.claim_broadcast_trial(uid):
         await callback.answer("Вы уже воспользовались триалом", show_alert=True)
         return
 

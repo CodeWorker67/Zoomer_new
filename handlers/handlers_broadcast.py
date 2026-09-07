@@ -72,7 +72,7 @@ SCOPE_LABEL = {
 
 CUSTOM_PRESETS = [
     ("free_vpn", "🔥 Попробовать бесплатно", None),
-    ("get_trial", "🎁 Получить триал", STYLE_SUCCESS),
+    ("get_trial", "🎁 7 дней бесплатно!", STYLE_SUCCESS),
     ("buy_vpn", "💰 Купить подписку", STYLE_SUCCESS),
     ("wl_traffic_buy", "📦 Купить трафик", STYLE_SUCCESS),
     ("connect_vpn", "🔗 Подключить VPN", STYLE_PRIMARY),

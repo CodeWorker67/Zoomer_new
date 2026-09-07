@@ -2,7 +2,7 @@ import urllib.parse
 from datetime import datetime, timezone
 
 from bot import sql, x3, bot
-from config import CHANEL_ID, PUBLIC_SITE_URL, PARTNER_PROCENT, PARTNER_MIN, SUPPORT_URL, BOT_URL
+from config import CHANEL_ID, CHECKER_ID, PUBLIC_SITE_URL, PARTNER_PROCENT, PARTNER_MIN, SUPPORT_URL, BOT_URL
 from handlers.handlers_start_prize import schedule_start_prize
 from lead_tracker import post_user_registered, post_user_trial, tracker_source_from_ref_and_stamp
 from keyboard import (keyboard_start, keyboard_tariff_bonus, keyboard_tariff,
@@ -562,6 +562,17 @@ async def _issue_broadcast_trial(callback: CallbackQuery) -> bool:
         keyboard_sub_after_buy(sub_url),
     )
     logger.info(f"get_trial: триал активирован user={uid} days={days}")
+
+    if CHECKER_ID is not None:
+        try:
+            await bot.send_message(
+                chat_id=CHECKER_ID,
+                text=f"Пользователь <code>{uid}</code> взял триал {days} дней",
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.error(f"get_trial: не удалось уведомить CHECKER_ID user={uid}: {e}")
+
     return True
 
 

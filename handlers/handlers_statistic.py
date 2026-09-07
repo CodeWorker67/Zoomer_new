@@ -357,7 +357,7 @@ def _sync_build_anal_payment_excel(year: int, daily_by_month: dict) -> str:
 
 @router.message(Command(commands=['stat']))
 async def stat_command(message: Message):
-    """Статистика по пользователям с указанным Ref или stamp (админы, CHECKER_IDS, CHECKER_ID)."""
+    """Статистика по Ref, stamp или partner_{id} (админы, CHECKER_IDS, CHECKER_ID)."""
     allowed = ADMIN_IDS | CHECKER_IDS
     if CHECKER_ID is not None:
         allowed = allowed | {CHECKER_ID}
@@ -366,7 +366,7 @@ async def stat_command(message: Message):
 
     args = message.text.split()
     if len(args) < 2:
-        await message.answer("❌ Использование: /stat <аргумент>")
+        await message.answer("❌ Использование: /stat <Ref|stamp|partner_{telegram_id}>")
         return
 
     arg = args[1].strip()

@@ -1865,13 +1865,14 @@ class AsyncSQL:
     async def SELECT_USERS_BY_PARAMETER(self, parameter: str, value: str) -> List[int]:
         """
         Возвращает список user_id, у которых значение указанного параметра равно value.
-        Допустимые параметры: 'Ref', 'in_panel', 'Is_pay_null' (синоним in_panel), 'stamp'.
+        Допустимые параметры: 'Ref', 'in_panel', 'Is_pay_null' (синоним in_panel), 'stamp', 'partner'.
         """
         param_map = {
             'Ref': Users.ref,
             'in_panel': Users.in_panel,
             'Is_pay_null': Users.in_panel,
             'stamp': Users.stamp,
+            'partner': Users.partner,
         }
         if parameter not in param_map:
             logger.info(f"Invalid parameter: {parameter}")
@@ -1902,19 +1903,27 @@ class AsyncSQL:
         Optional[int], Optional[str], Optional[int], Optional[int], Optional[int],
     ]:
         """
-        Возвращает статистику по пользователям, у которых Ref == arg,
-        если таких нет – по пользователям с stamp == arg.
+        Возвращает статистику по пользователям:
+        - partner_{id} — зашедшие по партнёрской ссылке (Users.partner == id);
+        - иначе Ref == arg, если таких нет — stamp == arg.
         total_payments — сумма подтверждённых платежей: Payments + WATA СБП + WATA карта + FreeKassa.
         Возвращает (total, with_sub, with_tarif, with_tarif_not_blocked, total_payments, source,
         wata_sbp, wata_card, fk_sbp) или 9×None если нет совпадений.
         """
-        # 1. Ищем по Ref
-        users = await self.SELECT_USERS_BY_PARAMETER('Ref', arg)
-        source = 'ref'
-        if not users:
-            # 2. Ищем по stamp
-            users = await self.SELECT_USERS_BY_PARAMETER('stamp', arg)
-            source = 'stamp'
+        if arg.startswith('partner_'):
+            partner_id = arg.replace('partner_', '', 1)
+            if not partner_id.isdigit():
+                return None, None, None, None, None, None, None, None, None
+            users = await self.SELECT_USERS_BY_PARAMETER('partner', partner_id)
+            source = 'partner'
+        else:
+            # 1. Ищем по Ref
+            users = await self.SELECT_USERS_BY_PARAMETER('Ref', arg)
+            source = 'ref'
+            if not users:
+                # 2. Ищем по stamp
+                users = await self.SELECT_USERS_BY_PARAMETER('stamp', arg)
+                source = 'stamp'
 
         if not users:
             return None, None, None, None, None, None, None, None, None

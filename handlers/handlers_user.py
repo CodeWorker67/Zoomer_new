@@ -12,6 +12,7 @@ from keyboard import (keyboard_start, keyboard_tariff_bonus, keyboard_tariff,
                       keyboard_partner_withdraw, keyboard_buy_menu, keyboard_earn_with_us,
                       OPEN_SITE_CB, SITE_URL,
                       keyboard_trial_existing_expired, keyboard_subscription_manage,
+                      keyboard_sub_after_buy,
                       keyboard_about_service, ABOUT_SERVICE_CB, BTN_BACK)
 from utils.menu_ui import (
     MAIN_MENU_BUTTON_TEXT,
@@ -46,7 +47,12 @@ from aiogram.types import (
 )
 from aiogram.filters import BaseFilter, ChatMemberUpdatedFilter, KICKED, MEMBER, Command
 from lexicon import lexicon
-from wl_traffic.service import credit_wl_subscription_bonus
+from wl_traffic.service import (
+    credit_wl_subscription_bonus,
+    fetch_panel_user,
+    reassign_to_active_squad,
+    user_on_limited_squad,
+)
 from wl_traffic.texts import format_pro_payment_link
 
 
@@ -56,6 +62,8 @@ router: Router = Router()
 _USER_TUPLE_RESERVE_FIELD = 8
 _USER_TUPLE_SUBSCRIPTION_END_DATE = 9
 _USER_TUPLE_FIELD_BOOL_3 = 21
+_BROADCAST_TRIAL_DAYS = 7
+_BROADCAST_TRIAL_WL_GB = 3.0
 
 
 async def _show_main_menu(
@@ -390,30 +398,30 @@ async def secret_tariff_payment(callback: CallbackQuery):
     )
 
 
-@router.callback_query(F.data == 'r_120')
-async def process_payment_method_bonus(callback: CallbackQuery):
-    uid = callback.from_user.id
-    user_data = await sql.get_user(uid)
-    if user_data is None:
-        await sql.add_user(uid, False)
-        user_data = await sql.get_user(uid)
-    if (
-        user_data is not None
-        and len(user_data) > _USER_TUPLE_FIELD_BOOL_3
-        and user_data[_USER_TUPLE_FIELD_BOOL_3]
-    ):
-        await callback.answer(
-            "Вы уже воспользовались этой акцией!",
-            show_alert=True,
-        )
-        return
-    await callback.answer()
-    await edit_or_send_photo(
-        callback,
-        "buy_subscription",
-        _R120_PAYMENT_TEXT,
-        keyboard_payment_method_stock("r_120"),
-    )
+# @router.callback_query(F.data == 'r_120')
+# async def process_payment_method_bonus(callback: CallbackQuery):
+#     uid = callback.from_user.id
+#     user_data = await sql.get_user(uid)
+#     if user_data is None:
+#         await sql.add_user(uid, False)
+#         user_data = await sql.get_user(uid)
+#     if (
+#         user_data is not None
+#         and len(user_data) > _USER_TUPLE_FIELD_BOOL_3
+#         and user_data[_USER_TUPLE_FIELD_BOOL_3]
+#     ):
+#         await callback.answer(
+#             "Вы уже воспользовались этой акцией!",
+#             show_alert=True,
+#         )
+#         return
+#     await callback.answer()
+#     await edit_or_send_photo(
+#         callback,
+#         "buy_subscription",
+#         _R120_PAYMENT_TEXT,
+#         keyboard_payment_method_stock("r_120"),
+#     )
 
 
 @router.callback_query(F.data.in_({'r_7', 'r_30', 'r_90', 'r_180', 'r_365', 'r_730'}))
@@ -484,6 +492,87 @@ async def free_vpn_cb(callback: CallbackQuery):
         keyboard_subscription_manage(sub_url),
     )
     await post_user_trial(uid)
+
+
+async def _trial_already_used(uid: int) -> bool:
+    user_data = await sql.get_user(uid)
+    if user_data is None:
+        await sql.add_user(uid, False)
+        user_data = await sql.get_user(uid)
+    return (
+        user_data is not None
+        and len(user_data) > _USER_TUPLE_FIELD_BOOL_3
+        and user_data[_USER_TUPLE_FIELD_BOOL_3]
+    )
+
+
+async def _issue_broadcast_trial(callback: CallbackQuery) -> bool:
+    uid = callback.from_user.id
+    days = _BROADCAST_TRIAL_DAYS
+
+    if await sql.get_user(uid) is None:
+        await sql.add_user(uid, False)
+
+    await sql.update_field_bool_3(uid, True)
+
+    user_id_str = str(uid)
+    existing_user = await x3.get_user_by_username(user_id_str)
+    panel_exists = bool(existing_user and existing_user.get("response"))
+
+    try:
+        if panel_exists:
+            ok = await x3.updateClient(days, user_id_str, uid)
+        else:
+            ok = await x3.addClient(days, user_id_str, uid)
+    except Exception as e:
+        logger.error(f"get_trial: ошибка панели для {uid}: {e}")
+        ok = False
+
+    if not ok:
+        await sql.update_field_bool_3(uid, False)
+        await callback.answer(
+            "Не удалось активировать триал. Попробуйте позже или напишите в поддержку.",
+            show_alert=True,
+        )
+        return False
+
+    if await sql.get_user(uid) is not None:
+        await sql.update_in_panel(uid)
+    else:
+        await sql.add_user(uid, True)
+
+    try:
+        await sql.add_wl_limit(uid, _BROADCAST_TRIAL_WL_GB)
+        panel_user = await fetch_panel_user(x3, uid, sql=sql)
+        if panel_user and user_on_limited_squad(panel_user):
+            await reassign_to_active_squad(x3, panel_user)
+    except Exception as e:
+        logger.error(f"get_trial: не удалось начислить WL-трафик user={uid}: {e}")
+
+    if not panel_exists:
+        await post_user_trial(uid)
+
+    sub_url = await x3.sublink(user_id_str)
+    end_time = await subscription_end_display(uid)
+    text = lexicon["trial_success"].format(end_time, days, sub_url)
+    await edit_or_send_photo(
+        callback,
+        "subscription_manage",
+        text,
+        keyboard_sub_after_buy(sub_url),
+    )
+    logger.info(f"get_trial: триал активирован user={uid} days={days}")
+    return True
+
+
+@router.callback_query(F.data == 'get_trial')
+async def get_trial_cb(callback: CallbackQuery):
+    if await _trial_already_used(callback.from_user.id):
+        await callback.answer("Вы уже воспользовались триалом", show_alert=True)
+        return
+
+    await callback.answer()
+    await _issue_broadcast_trial(callback)
 
 
 @router.callback_query(F.data == 'earn_with_us')

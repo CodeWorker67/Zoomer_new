@@ -120,7 +120,7 @@ async def main() -> None:
         id='wl_forever_monthly',
         misfire_grace_time=3600,
     )
-    scheduler.add_job(check_online_daily, 'cron', hour=2, minute=55, id='daily_online_stats', misfire_grace_time=60)
+    scheduler.add_job(check_online_daily, 'cron', hour=2, minute=53, id='daily_online_stats', misfire_grace_time=60)
     scheduler.add_job(
         pg_dump_backup_cron,
         trigger='interval',

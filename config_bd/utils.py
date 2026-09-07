@@ -1808,9 +1808,16 @@ class AsyncSQL:
                     Users.is_delete == False,
                     Users.user_id.notin_(multi_paid),
                     Users.user_id.notin_(non_short_paid),
+                )
+            )
+        if category == "subscribe_none_or_expired_10d":
+            cutoff = current_time - timedelta(days=10)
+            return wrap(
+                and_(
+                    Users.is_delete == False,
                     or_(
-                        Users.field_bool_3.is_(False),
-                        Users.field_bool_3.is_(None),
+                        Users.subscription_end_date.is_(None),
+                        Users.subscription_end_date <= cutoff,
                     ),
                 )
             )

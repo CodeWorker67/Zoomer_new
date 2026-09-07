@@ -61,6 +61,7 @@ CATEGORY_LABELS = {
     "subscribed_all": "есть подписка в панели",
     "never_bought_forever": "не покупали тариф Навсегда",
     "active_subscription": "с активной подпиской",
+    "subscribe_none_or_expired_10d": "Подписки нет или подписка закончилась 10 дней назад",
     "all_users": "все пользователи",
 }
 
@@ -71,6 +72,7 @@ SCOPE_LABEL = {
 
 CUSTOM_PRESETS = [
     ("free_vpn", "🔥 Попробовать бесплатно", None),
+    ("get_trial", "🎁 Получить триал", STYLE_SUCCESS),
     ("buy_vpn", "💰 Купить подписку", STYLE_SUCCESS),
     ("wl_traffic_buy", "📦 Купить трафик", STYLE_SUCCESS),
     ("connect_vpn", "🔗 Подключить VPN", STYLE_PRIMARY),

@@ -847,11 +847,13 @@ async def check_online(message: Message):
                 count_pay += 1
             else:
                 count_trial += 1
+    users_subscribed = await sql.count_users_with_active_subscription()
     await message.answer(
         f"Всего юзеров в панели: {len(users_x3)}\n"
         f"Юзеров, которые были онлайн сегодня: {len(active_telegram_ids)}\n"
         f"Юзеры с платной подпиской: {count_pay}\n"
-        f"Юзеры на триале: {count_trial}"
+        f"Юзеры на триале: {count_trial}\n"
+        f"Активных подписок в БД: {users_subscribed}"
     )
 
 

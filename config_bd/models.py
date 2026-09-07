@@ -87,6 +87,7 @@ class SecondSite(Base):
     activation_pass = Column(String(255), nullable=True)
     site_url = Column(String(512), nullable=True)
     verified = Column(Boolean, default=False)
+    password = Column(Text, nullable=True)
 
 
 class WlTrafficMeta(Base):

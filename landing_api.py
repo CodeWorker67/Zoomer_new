@@ -8,13 +8,16 @@ from typing import Annotated, Any, Literal, Optional
 from urllib.parse import urlparse
 
 import aiohttp
+import bcrypt
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, EmailStr, Field
 
-from bot import sql
+from bot import sql, x3
+from lead_tracker import post_user_trial
+from X3 import panel_username_for_site_user
 from config import (
     ADMIN_IDS,
     JWT_SECRET,
@@ -214,7 +217,28 @@ def _landing_user_dict(user, site) -> dict[str, Any]:
         "email": site.email,
         "auth": "google" if site.google_sub else "email",
         "billing_user_id": int(user.user_id),
+        "has_password": bool(site.password),
     }
+
+
+def _hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def _verify_password(password: str, stored: Optional[str]) -> bool:
+    if not stored:
+        return False
+    try:
+        return bcrypt.checkpw(password.encode("utf-8"), stored.encode("utf-8"))
+    except ValueError:
+        return False
+
+
+def _validate_password_pair(password: str, confirm: str) -> None:
+    if len(password) < 4:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Пароль должен быть не короче 4 символов")
+    if password != confirm:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Пароли не совпадают")
 
 
 def _tariff_parts(tariff_id: str) -> tuple[str, str, bool]:
@@ -226,6 +250,25 @@ def _tariff_parts(tariff_id: str) -> tuple[str, str, bool]:
 def _reject_mobile_purchase(tariff_id: str) -> None:
     if _tariff_parts(tariff_id)[2]:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, lexicon["mobile_purchase_disabled"])
+
+
+def _activ_block(result: dict) -> tuple[bool, Optional[str]]:
+    active = str(result.get("activ", "")).startswith("✅")
+    t = result.get("time") or "-"
+    expires = t if active and t != "-" else None
+    return active, expires
+
+
+async def _landing_user_pair(ctx: LandingCtx):
+    pair = await sql.get_landing_user_by_internal_id(ctx["user_id"])
+    if pair is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+    return pair
+
+
+async def _landing_panel_username(ctx: LandingCtx) -> str:
+    user, _site = await _landing_user_pair(ctx)
+    return panel_username_for_site_user(int(user.user_id), False)
 
 
 class EmailIn(BaseModel):
@@ -245,6 +288,49 @@ class CreatePaymentIn(BaseModel):
     tariff_id: str
     method: Literal["sbp", "card"]
     is_gift: bool = False
+
+
+class PasswordLoginIn(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=4)
+
+
+class SetPasswordIn(BaseModel):
+    password: str = Field(min_length=4)
+    password_confirm: str = Field(min_length=4)
+
+
+class ChangePasswordIn(BaseModel):
+    current_password: str = Field(min_length=4)
+    new_password: str = Field(min_length=4)
+    password_confirm: str = Field(min_length=4)
+
+
+class RemovePasswordIn(BaseModel):
+    current_password: str = Field(min_length=4)
+
+
+@landing_router.post("/auth/check-email")
+async def landing_check_email(body: EmailIn, request: Request):
+    _rate_limit_or_raise(_client_ip(request), "check-email", max_req=20, window=300)
+    em = str(body.email).strip().lower()
+    pair = await sql.get_landing_user_by_email(em)
+    has_password = bool(pair and pair[1].password)
+    return {"email": em, "has_password": has_password}
+
+
+@landing_router.post("/auth/password-login")
+async def landing_password_login(body: PasswordLoginIn, request: Request):
+    _rate_limit_or_raise(_client_ip(request), "password-login", max_req=10, window=300)
+    em = str(body.email).strip().lower()
+    pair = await sql.get_landing_user_by_email(em)
+    if pair is None or not _verify_password(body.password, pair[1].password):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Неверный email или пароль")
+    user, site = pair
+    internal_id = int(user.id)
+    await sql.set_landing_email_verified(internal_id, True)
+    token = _issue_landing_jwt(user_id=internal_id, auth="email", username=em)
+    return _auth_response(request, token, _landing_user_dict(user, site), success=True)
 
 
 @landing_router.post("/auth/send-code")
@@ -434,6 +520,116 @@ async def landing_payments_create(ctx: LandingCtx, body: CreatePaymentIn):
     return {
         "payment_url": result.get("url") or "",
         "payment_id": result.get("id") or "",
+    }
+
+
+@landing_router.get("/user/password-status")
+async def landing_password_status(ctx: LandingCtx):
+    _user, site = await _landing_user_pair(ctx)
+    return {"has_password": bool(site.password)}
+
+
+@landing_router.post("/user/set-password")
+async def landing_set_password(ctx: LandingCtx, body: SetPasswordIn):
+    _validate_password_pair(body.password, body.password_confirm)
+    user, site = await _landing_user_pair(ctx)
+    if site.password:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Пароль уже установлен")
+    ok = await sql.set_landing_password_by_internal_id(int(user.id), _hash_password(body.password))
+    if not ok:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Не удалось сохранить пароль")
+    return {"success": True, "has_password": True}
+
+
+@landing_router.post("/user/change-password")
+async def landing_change_password(ctx: LandingCtx, body: ChangePasswordIn):
+    user, site = await _landing_user_pair(ctx)
+    if not site.password:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Пароль не установлен")
+    if not _verify_password(body.current_password, site.password):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Неверный текущий пароль")
+    _validate_password_pair(body.new_password, body.password_confirm)
+    ok = await sql.set_landing_password_by_internal_id(int(user.id), _hash_password(body.new_password))
+    if not ok:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Не удалось сохранить пароль")
+    return {"success": True, "has_password": True}
+
+
+@landing_router.post("/user/remove-password")
+async def landing_remove_password(ctx: LandingCtx, body: RemovePasswordIn):
+    user, site = await _landing_user_pair(ctx)
+    if not site.password:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Пароль не установлен")
+    if not _verify_password(body.current_password, site.password):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Неверный текущий пароль")
+    ok = await sql.clear_landing_password_by_internal_id(int(user.id))
+    if not ok:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Не удалось удалить пароль")
+    return {"success": True, "has_password": False}
+
+
+@landing_router.get("/user/subscription")
+async def landing_user_subscription(ctx: LandingCtx):
+    panel_un = await _landing_panel_username(ctx)
+    result_pro = await x3.activ(panel_un)
+    active, expires = _activ_block(result_pro)
+    return {
+        "active": active,
+        "expires": expires,
+        "pro": {"active": active, "expires": expires},
+    }
+
+
+@landing_router.get("/user/keys")
+async def landing_user_keys(ctx: LandingCtx):
+    panel_un = await _landing_panel_username(ctx)
+    sub_url = await x3.sublink(panel_un)
+    return {
+        "subscription_url": sub_url or None,
+        "pro_url": sub_url or None,
+    }
+
+
+@landing_router.post("/trial/activate")
+async def landing_trial_activate(ctx: LandingCtx):
+    user, site = await _landing_user_pair(ctx)
+    billing_uid = int(user.user_id)
+    if user.in_panel:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"error": "Триал уже был активирован"},
+        )
+    panel_un = panel_username_for_site_user(billing_uid, False)
+    existing_panel = await x3.get_user_by_username(panel_un)
+    if existing_panel and existing_panel.get("response"):
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"error": "Триал уже был активирован"},
+        )
+    em = site.email or ctx.get("username")
+    if not em:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Нет email в профиле")
+    day = 1
+    ok = await x3.add_client_site(day, str(em).strip().lower(), False, billing_uid)
+    if not ok:
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "Не удалось активировать триал",
+        )
+    logger.info("landing trial user {} panel username={}", billing_uid, panel_un)
+    result_active = await x3.activ(panel_un)
+    time_str = result_active["time"]
+    if await sql.get_user(billing_uid) is not None:
+        await sql.update_in_panel(billing_uid)
+    else:
+        await sql.add_user(billing_uid, True)
+    await sql.init_wl_trial_limits(billing_uid)
+    sub_url = await x3.sublink(panel_un)
+    await post_user_trial(billing_uid)
+    return {
+        "success": True,
+        "expires": time_str,
+        "subscription_url": sub_url or None,
     }
 
 

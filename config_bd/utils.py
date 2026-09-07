@@ -590,6 +590,34 @@ class AsyncSQL:
             await session.commit()
             return True
 
+    async def set_landing_password_by_internal_id(self, internal_id: int, password_hash: str) -> bool:
+        async with self.session_factory() as session:
+            user = await session.get(Users, internal_id)
+            if user is None:
+                return False
+            stmt = (
+                update(SecondSite)
+                .where(SecondSite.tg_id == user.user_id)
+                .values(password=password_hash)
+            )
+            r = await session.execute(stmt)
+            await session.commit()
+            return (r.rowcount or 0) > 0
+
+    async def clear_landing_password_by_internal_id(self, internal_id: int) -> bool:
+        async with self.session_factory() as session:
+            user = await session.get(Users, internal_id)
+            if user is None:
+                return False
+            stmt = (
+                update(SecondSite)
+                .where(SecondSite.tg_id == user.user_id)
+                .values(password=None)
+            )
+            r = await session.execute(stmt)
+            await session.commit()
+            return (r.rowcount or 0) > 0
+
     async def set_password_hash_by_internal_id(self, internal_id: int, password_hash: str) -> bool:
         async with self.session_factory() as session:
             user = await session.get(Users, internal_id)
@@ -2581,7 +2609,6 @@ class AsyncSQL:
         async with self.session_factory() as session:
             now = datetime.now()
             stmt = select(func.count()).select_from(Users).where(
-                Users.is_delete == False,
                 Users.subscription_end_date.isnot(None),
                 Users.subscription_end_date > now,
             )

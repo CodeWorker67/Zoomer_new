@@ -1895,13 +1895,18 @@ class AsyncSQL:
             logger.info(f"Query result for parameter '{parameter}' with value '{value}': {len(rows)}")
             return [row[0] for row in rows]
 
-    async def get_stat_by_ref_or_stamp(self, arg: str) -> Tuple[Optional[int], Optional[int], Optional[int], Optional[int], Optional[int], Optional[str]]:
+    async def get_stat_by_ref_or_stamp(
+        self, arg: str
+    ) -> Tuple[
+        Optional[int], Optional[int], Optional[int], Optional[int],
+        Optional[int], Optional[str], Optional[int], Optional[int], Optional[int],
+    ]:
         """
         Возвращает статистику по пользователям, у которых Ref == arg,
         если таких нет – по пользователям с stamp == arg.
         total_payments — сумма подтверждённых платежей: Payments + WATA СБП + WATA карта + FreeKassa.
-        Возвращает (total, with_sub, with_tarif, with_tarif_not_blocked, total_payments, source)
-        или (None, None, None, None, None, None) если нет совпадений.
+        Возвращает (total, with_sub, with_tarif, with_tarif_not_blocked, total_payments, source,
+        wata_sbp, wata_card, fk_sbp) или 9×None если нет совпадений.
         """
         # 1. Ищем по Ref
         users = await self.SELECT_USERS_BY_PARAMETER('Ref', arg)
@@ -1912,13 +1917,16 @@ class AsyncSQL:
             source = 'stamp'
 
         if not users:
-            return None, None, None, None, None, None
+            return None, None, None, None, None, None, None, None, None
 
         total = len(users)
         with_sub = 0
         with_tarif = 0
         with_tarif_not_blocked = 0
         total_payments = 0
+        wata_sbp = 0
+        wata_card = 0
+        fk_sbp = 0
 
         async with self.session_factory() as session:
             for i in range(0, len(users), _STAT_IN_CHUNK):
@@ -1946,26 +1954,27 @@ class AsyncSQL:
                     Payments.user_id.in_(chunk),
                     Payments.status == 'confirmed',
                 )
-                total_payments += (await session.execute(stmt_pay)).scalar() or 0
+                chunk_payments = (await session.execute(stmt_pay)).scalar() or 0
                 stmt_wata_sbp = select(func.coalesce(func.sum(PaymentsWataSBP.amount), 0)).where(
                     PaymentsWataSBP.user_id.in_(chunk),
                     PaymentsWataSBP.status == 'confirmed',
                 )
-                wata_sbp = total_payments
-                total_payments += (await session.execute(stmt_wata_sbp)).scalar() or 0
+                chunk_wata_sbp = (await session.execute(stmt_wata_sbp)).scalar() or 0
                 stmt_wata_card = select(func.coalesce(func.sum(PaymentsWataCard.amount), 0)).where(
                     PaymentsWataCard.user_id.in_(chunk),
                     PaymentsWataCard.status == 'confirmed',
                 )
-                wata_card = total_payments - wata_sbp
-                total_payments += (await session.execute(stmt_wata_card)).scalar() or 0
+                chunk_wata_card = (await session.execute(stmt_wata_card)).scalar() or 0
                 stmt_fk_sbp = select(func.coalesce(func.sum(PaymentsFkSBP.amount), 0)).where(
                     PaymentsFkSBP.user_id.in_(chunk),
                     PaymentsFkSBP.status == 'confirmed',
                 )
-                total_payments += (await session.execute(stmt_fk_sbp)).scalar() or 0
+                chunk_fk_sbp = (await session.execute(stmt_fk_sbp)).scalar() or 0
 
-                fk_sbp = total_payments - wata_sbp - wata_card
+                wata_sbp += chunk_wata_sbp
+                wata_card += chunk_wata_card
+                fk_sbp += chunk_fk_sbp
+                total_payments += chunk_payments + chunk_wata_sbp + chunk_wata_card + chunk_fk_sbp
 
         return total, with_sub, with_tarif, with_tarif_not_blocked, total_payments, source, wata_sbp, wata_card, fk_sbp
 

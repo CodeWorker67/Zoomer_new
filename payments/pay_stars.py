@@ -1,4 +1,4 @@
-from bot import bot
+from bot import bot, sql
 from config import ADMIN_IDS
 from keyboard import keyboard_payment_stars
 from logging_config import logger
@@ -7,6 +7,7 @@ from aiogram import Router, F
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery, LabeledPrice, PreCheckoutQuery, Message
 from lexicon import lexicon
+from payments.gift_pricing import gift_rub_amount_and_desc
 from payments.payload_source import BOT
 from payments.process_payload import process_confirmed_payment
 from payments.tariff_gate import is_mobile_tariff_key, normalize_tariff_duration_key
@@ -46,7 +47,10 @@ async def process_payment_stars(callback: CallbackQuery):
         await callback.answer(lexicon['mobile_purchase_disabled'], show_alert=True)
         return
 
-    stars_amount = get_stars_amount('Stars', duration)
+    if gift_flag:
+        stars_amount, _ = await gift_rub_amount_and_desc(sql, callback.from_user.id, duration)
+    else:
+        stars_amount = get_stars_amount('Stars', duration)
     if callback.from_user.id in ADMIN_IDS:
         stars_amount = 1
     user_id = str(callback.from_user.id)

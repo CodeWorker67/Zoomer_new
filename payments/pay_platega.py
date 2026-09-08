@@ -14,6 +14,7 @@ from config import (
 )
 from keyboard import keyboard_payment_sbp, create_kb
 from lexicon import dct_desc, dct_price, lexicon
+from payments.gift_pricing import gift_rub_amount_and_desc, regular_rub_amount
 from logging_config import logger
 from payments.payment_limits import payment_creation_allowed
 from payments.payload_source import BOT, SITE
@@ -401,7 +402,11 @@ async def _handle_platega_button_callback(callback: CallbackQuery, ui_kind: str)
         log_label = "Platega (кнопка карта)"
     duration, gift_flag = _duration_from_callback(data, prefix, gift_prefix)
     desc_key = duration
-    rub_amount = dct_price[duration]
+    if gift_flag:
+        rub_amount, gift_des = await gift_rub_amount_and_desc(sql, callback.from_user.id, desc_key)
+    else:
+        rub_amount = regular_rub_amount(duration)
+        gift_des = dct_desc[desc_key]
     if callback.from_user.id in ADMIN_IDS:
         rub_amount = 1
     user_id = str(callback.from_user.id)
@@ -411,7 +416,7 @@ async def _handle_platega_button_callback(callback: CallbackQuery, ui_kind: str)
     if gift_flag:
         payment_info = await pay_for_gift(
             val=str(rub_amount),
-            des=f"Подписка в подарок {dct_desc[desc_key]}",
+            des=gift_des,
             user_id=user_id,
             duration=duration,
             white=False,
@@ -468,7 +473,11 @@ async def process_payment_card(callback: CallbackQuery):
         return
 
     desc_key = duration
-    rub_amount = dct_price[duration]
+    if gift_flag:
+        rub_amount, gift_des = await gift_rub_amount_and_desc(sql, callback.from_user.id, desc_key)
+    else:
+        rub_amount = regular_rub_amount(duration)
+        gift_des = dct_desc[desc_key]
     if callback.from_user.id in ADMIN_IDS:
         rub_amount = 1
     user_id = str(callback.from_user.id)
@@ -478,7 +487,7 @@ async def process_payment_card(callback: CallbackQuery):
     if gift_flag:
         payment_info = await pay_for_gift(
             val=str(rub_amount),
-            des=f"Подписка в подарок {dct_desc[desc_key]}",
+            des=gift_des,
             user_id=user_id,
             duration=duration,
             white=False,

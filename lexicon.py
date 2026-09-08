@@ -125,6 +125,12 @@ lexicon = {
           f'Если есть вопросы - напишите в <a href="{SUPPORT_URL}">Поддержку</a> или на почту Zoomerskysupp@proton.me',
 
     'gift_start': 'Выберите подписку, которую вы хотите подарить другу:',
+    'gift_start_repeat': (
+        '🏆 <b>Ачивка: З-заботливость</b>\n\n'
+        '🎁 Вы уже делали подарок — вам <b>скидка 10%</b> на подарки '
+        'относительно тарифов для себя.\n\n'
+        '👇 Выберите подписку, которую хотите подарить другу:'
+    ),
     'error_payment': 'Произошла ошибка при создании счета, попробуйте еще раз.',
 
     'payment_too_many_pending': 'Одновременно может быть не больше {0} незавершённых счетов (все способы оплаты вместе). '
@@ -613,3 +619,58 @@ dct_desc = {
     '5000sale': '♾️ Навсегда — 2790 руб (5000 дн.)',
     '30secret': '🔒 Секретный тариф — 30 дней — 149 руб',
 }
+
+# Цены подарков для пользователей, которые уже дарили (−10% от dct_price).
+dct_price_gift_repeat = {
+    '7': 89,
+    '30': 269,
+    '90': 674,
+    '180': 1214,
+    '365': 2159,
+    '730': 3329,
+}
+
+GIFT_BENEFIT_BASE_MONTH = 299
+
+_GIFT_TARIFF_ICONS = {
+    '7': '👌',
+    '30': '🤝',
+    '90': '✅',
+    '180': '🏆',
+    '365': '💎',
+    '730': '🔥',
+}
+
+_GIFT_TARIFF_MONTHS = {
+    '90': 3,
+    '180': 6,
+    '365': 12,
+    '730': 24,
+}
+
+
+def resolve_gift_price(duration_key: str, *, repeat_giver: bool) -> int:
+    if repeat_giver:
+        return dct_price_gift_repeat[duration_key]
+    return dct_price[duration_key]
+
+
+def _gift_benefit_pct(duration_key: str, price: int) -> int | None:
+    months = _GIFT_TARIFF_MONTHS.get(duration_key)
+    if not months:
+        return None
+    base = GIFT_BENEFIT_BASE_MONTH * months
+    return round((base - price) / base * 100)
+
+
+def format_gift_tariff_label(duration_key: str, *, repeat_giver: bool) -> str:
+    price = resolve_gift_price(duration_key, repeat_giver=repeat_giver)
+    icon = _GIFT_TARIFF_ICONS.get(duration_key, '')
+    if duration_key == '730':
+        period = '2 года'
+    else:
+        period = f'{duration_key} дней'
+    benefit = _gift_benefit_pct(duration_key, price)
+    if benefit is not None:
+        return f'{icon} {period} — {price} руб (выгода −{benefit}%)'
+    return f'{icon} {period} — {price} руб'

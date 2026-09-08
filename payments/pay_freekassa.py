@@ -18,6 +18,7 @@ from config import (
 from utils.menu_ui import edit_or_send_screen
 from keyboard import keyboard_payment_sbp, create_kb
 from lexicon import dct_price, dct_desc, lexicon
+from payments.gift_pricing import gift_rub_amount_and_desc, regular_rub_amount
 from logging_config import logger
 from payments.payment_limits import payment_creation_allowed
 from payments.tariff_gate import is_mobile_tariff_key, normalize_tariff_duration_key
@@ -359,7 +360,11 @@ async def _handle_wata_style_callback(callback: CallbackQuery, ui_kind: UiKind) 
     gift_prefix = "wata_sbp_gift_r_" if ui_kind == "sbp" else "wata_card_gift_r_"
     duration, gift_flag = _duration_from_callback(data, prefix, gift_prefix)
     desc_key = duration
-    rub_amount = dct_price[duration]
+    if gift_flag:
+        rub_amount, gift_des = await gift_rub_amount_and_desc(sql, callback.from_user.id, desc_key)
+    else:
+        rub_amount = regular_rub_amount(duration)
+        gift_des = dct_desc[desc_key]
     if callback.from_user.id in ADMIN_IDS:
         rub_amount = 10 if ui_kind == "sbp" else 1
     user_id = str(callback.from_user.id)
@@ -368,7 +373,7 @@ async def _handle_wata_style_callback(callback: CallbackQuery, ui_kind: UiKind) 
     if gift_flag:
         payment_info = await pay_for_gift(
             val=str(rub_amount),
-            des=f"Подписка в подарок {dct_desc[desc_key]}",
+            des=gift_des,
             user_id=user_id,
             duration=duration,
             white=False,

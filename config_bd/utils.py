@@ -1856,6 +1856,14 @@ class AsyncSQL:
                     func.date(Users.subscription_end_date) >= today_d,
                 )
             )
+        if category == "made_gifts":
+            gift_givers = select(Gifts.giver_id).distinct().subquery()
+            return wrap(
+                and_(
+                    Users.is_delete == False,
+                    Users.user_id.in_(select(gift_givers.c.giver_id)),
+                )
+            )
         return None
 
     async def count_users_for_broadcast(self, category: str, exclude_today: bool) -> int:
@@ -2193,6 +2201,12 @@ class AsyncSQL:
             except Exception as e:
                 await session.rollback()
                 logger.error(f"Error updating broadcast status for user {user_id}: {e}")
+
+    async def is_gift_giver(self, user_id: int) -> bool:
+        """True, если пользователь хотя бы раз дарил подписку (есть в gifts.giver_id)."""
+        async with self.session_factory() as session:
+            stmt = select(Gifts.giver_id).where(Gifts.giver_id == user_id).limit(1)
+            return (await session.execute(stmt)).scalar_one_or_none() is not None
 
     async def get_gift(self, gift_id: str) -> Optional[Gifts]:
         """Возвращает запись подарка или None."""

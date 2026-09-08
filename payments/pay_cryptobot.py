@@ -8,6 +8,7 @@ from config import CRYPTOBOT_API_TOKEN, ADMIN_IDS, PAYMENT_MAX_PENDING_PER_USER
 from utils.menu_ui import edit_or_send_screen
 from keyboard import create_kb
 from lexicon import lexicon, dct_price, dct_desc
+from payments.gift_pricing import gift_rub_amount_and_desc, regular_rub_amount
 from logging_config import logger
 from payments.payment_limits import payment_creation_allowed
 from payments.payload_source import BOT
@@ -161,17 +162,17 @@ async def process_payment_crypto(callback: CallbackQuery):
         await callback.answer(lexicon['mobile_purchase_disabled'], show_alert=True)
         return
 
-    rub_amount = dct_price[duration_key]
     desc_key = duration_key
     duration = normalize_tariff_duration_key(duration_key)
 
+    if gift_flag:
+        rub_amount, description = await gift_rub_amount_and_desc(sql, user_id, desc_key)
+    else:
+        rub_amount = regular_rub_amount(duration_key)
+        description = dct_desc[desc_key]
+
     if callback.from_user.id in ADMIN_IDS:
         rub_amount = 1
-
-    if gift_flag:
-        description = f"Подписка в подарок {dct_desc[desc_key]}"
-    else:
-        description = dct_desc[desc_key]
 
     result = await create_cryptobot_payment(
         rub_amount=rub_amount,

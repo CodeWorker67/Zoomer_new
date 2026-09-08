@@ -7,6 +7,7 @@ from handlers.handlers_start_prize import schedule_start_prize
 from lead_tracker import post_user_registered, post_user_trial, tracker_source_from_ref_and_stamp
 from keyboard import (keyboard_start, keyboard_tariff_bonus, keyboard_tariff,
                       keyboard_sub_after_free, ref_keyboard, keyboard_gift_tariff,
+                      keyboard_gift_tariff_repeat,
                       keyboard_payment_method, keyboard_payment_method_stock, chanel_keyboard, create_kb,
                       keyboard_inline_ref, keyboard_partner_intro, keyboard_partner_dashboard,
                       keyboard_partner_withdraw, keyboard_buy_menu, keyboard_earn_with_us,
@@ -710,11 +711,14 @@ async def partner_withdraw(callback: CallbackQuery):
 async def gift_subscription_start(callback: CallbackQuery):
     await callback.answer()
     """Начало процесса подарка подписки"""
+    repeat_giver = await sql.is_gift_giver(callback.from_user.id)
+    kb = keyboard_gift_tariff_repeat() if repeat_giver else keyboard_gift_tariff()
+    text = lexicon['gift_start_repeat'] if repeat_giver else lexicon['gift_start']
     await edit_or_send_photo(
         callback,
         "buy_subscription",
-        lexicon['gift_start'],
-        keyboard_gift_tariff(),
+        text,
+        kb,
     )
 
 
@@ -833,11 +837,14 @@ async def handle_back_to_menu(callback: CallbackQuery):
 async def handle_back_to_gift_menu(callback: CallbackQuery):
     """Обработчик для возврата в меню подарка подписки."""
     await callback.answer()
+    repeat_giver = await sql.is_gift_giver(callback.from_user.id)
+    kb = keyboard_gift_tariff_repeat() if repeat_giver else keyboard_gift_tariff()
+    text = lexicon['gift_start_repeat'] if repeat_giver else lexicon['gift_start']
     await edit_or_send_photo(
         callback,
         "buy_subscription",
-        lexicon['gift_start'],
-        keyboard_gift_tariff(),
+        text,
+        kb,
     )
 
 

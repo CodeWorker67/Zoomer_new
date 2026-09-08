@@ -268,6 +268,21 @@ def keyboard_gift_tariff():
     )
 
 
+def keyboard_gift_tariff_repeat():
+    from lexicon import format_gift_tariff_label
+
+    return create_kb(
+        1,
+        gift_r_7=format_gift_tariff_label('7', repeat_giver=True),
+        gift_r_30=format_gift_tariff_label('30', repeat_giver=True),
+        gift_r_90=format_gift_tariff_label('90', repeat_giver=True),
+        gift_r_180=format_gift_tariff_label('180', repeat_giver=True),
+        gift_r_365=format_gift_tariff_label('365', repeat_giver=True),
+        gift_r_730=format_gift_tariff_label('730', repeat_giver=True),
+        back_to_buy_menu='🔙 Назад',
+    )
+
+
 def keyboard_subscription(sub_url):
     buttons = []
     if sub_url:

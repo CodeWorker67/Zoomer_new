@@ -606,7 +606,7 @@ async def _export_database_to_excel_impl(
         error_message = f"❌ Ошибка при экспорте базы данных: {str(e)}"
         logger.error(error_message)
         logger.exception("Детали ошибки:")
-        await message.answer(error_message)
+        await message.answer(error_message, parse_mode=None)
 
 
 @router.message(Command(commands=["export"]))

@@ -71,6 +71,10 @@ UNISENDER_API_URL: str = (
 ).strip().rstrip("/")
 UNISENDER_FROM_NAME: str = (os.environ.get("UNISENDER_FROM_NAME") or "Зумерский VPN").strip()
 SMTP_FROM: Optional[str] = (os.environ.get("SMTP_FROM") or "").strip() or None
+SMTP_HOST: str = (os.environ.get("SMTP_HOST") or "smtp.go1.unisender.ru").strip()
+SMTP_PORT: int = int(os.environ.get("SMTP_PORT") or "587")
+SMTP_USER: Optional[str] = (os.environ.get("SMTP_USER") or "").strip() or None
+SMTP_PASSWORD: Optional[str] = (os.environ.get("SMTP_PASSWORD") or "").strip() or None
 
 POSTGRES_USER = os.getenv("POSTGRES_USER")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")

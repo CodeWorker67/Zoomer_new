@@ -20,8 +20,17 @@ from dotenv import load_dotenv
 
 load_dotenv(_root / ".env")
 
-from config import SMTP_FROM, UNISENDER_API_KEY, UNISENDER_API_URL, UNISENDER_FROM_NAME
-from services.unisender import is_configured, send_email
+from config import (
+    SMTP_FROM,
+    SMTP_HOST,
+    SMTP_PASSWORD,
+    SMTP_PORT,
+    SMTP_USER,
+    UNISENDER_API_KEY,
+    UNISENDER_API_URL,
+    UNISENDER_FROM_NAME,
+)
+from services.unisender import is_configured, is_http_configured, is_smtp_configured, send_email
 
 
 def main() -> int:
@@ -33,9 +42,11 @@ def main() -> int:
     print(f"URL={UNISENDER_API_URL!r}")
     print(f"FROM={SMTP_FROM!r} NAME={UNISENDER_FROM_NAME!r}")
     print(f"API_KEY set: {bool(UNISENDER_API_KEY)}")
+    print(f"HTTP ready: {is_http_configured()}")
+    print(f"SMTP ready: {is_smtp_configured()} ({SMTP_HOST}:{SMTP_PORT}, user={SMTP_USER!r})")
 
     if not is_configured():
-        print("ERROR: UNISENDER_API_KEY or SMTP_FROM not set in .env")
+        print("ERROR: configure UNISENDER_API_KEY+SMTP_FROM and/or SMTP_HOST/USER/PASSWORD/FROM in .env")
         return 1
 
     if not args.send:

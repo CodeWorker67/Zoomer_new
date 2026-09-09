@@ -6,6 +6,7 @@ import html as html_lib
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.utils import formataddr, parseaddr
 from typing import Any, Optional
 
 import aiohttp
@@ -27,12 +28,18 @@ _TIMEOUT = aiohttp.ClientTimeout(total=20)
 _SMTP_TIMEOUT = 20
 
 
+def _from_email() -> str:
+    """Bare address for Unisender from_email / SMTP envelope (no display name)."""
+    _, addr = parseaddr(SMTP_FROM or "")
+    return (addr or SMTP_FROM or "").strip()
+
+
 def is_http_configured() -> bool:
-    return bool(UNISENDER_API_KEY and SMTP_FROM)
+    return bool(UNISENDER_API_KEY and _from_email())
 
 
 def is_smtp_configured() -> bool:
-    return bool(SMTP_HOST and SMTP_USER and SMTP_PASSWORD and SMTP_FROM)
+    return bool(SMTP_HOST and SMTP_USER and SMTP_PASSWORD and _from_email())
 
 
 def is_configured() -> bool:
@@ -48,7 +55,7 @@ def _payload(*, to_email: str, subject: str, text: str, from_name: str, skip_uns
     return {
         "message": {
             "recipients": [{"email": to_email}],
-            "from_email": SMTP_FROM,
+            "from_email": _from_email(),
             "from_name": from_name,
             "subject": subject,
             "body": {
@@ -114,9 +121,13 @@ async def _send_via_http(*, to_email: str, subject: str, text: str, from_name: s
 
 
 def _send_via_smtp_sync(*, to_email: str, subject: str, text: str, from_name: str) -> None:
+    from_email = _from_email()
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
-    msg["From"] = f"{from_name} <{SMTP_FROM}>"
+    # formataddr encodes only the display name; the address stays ASCII.
+    # A raw f"{name} <{email}>" with Cyrillic gets RFC2047-encoded as one blob,
+    # and Unisender then rejects from_email as invalid.
+    msg["From"] = formataddr((from_name, from_email))
     msg["To"] = to_email
     msg.attach(MIMEText(text, "plain", "utf-8"))
     msg.attach(MIMEText(_html_from_text(text), "html", "utf-8"))
@@ -126,7 +137,7 @@ def _send_via_smtp_sync(*, to_email: str, subject: str, text: str, from_name: st
         smtp.starttls()
         smtp.ehlo()
         smtp.login(SMTP_USER or "", SMTP_PASSWORD or "")
-        smtp.sendmail(SMTP_FROM or "", [to_email], msg.as_string())
+        smtp.send_message(msg, from_addr=from_email, to_addrs=[to_email])
 
 
 async def _send_via_smtp(*, to_email: str, subject: str, text: str, from_name: str) -> None:

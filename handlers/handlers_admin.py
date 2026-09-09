@@ -342,8 +342,6 @@ async def _partner_admin_stats_text(tg_id: int) -> Optional[str]:
     user = await sql.get_user_object_by_user_id(tg_id)
     if user is None:
         return None
-    if not user.partner_flag:
-        return "not_partner"
 
     referrals = await sql.select_partner_count(tg_id)
     payments_sum = await sql.select_partner_referrals_payments_sum(tg_id)
@@ -389,12 +387,6 @@ async def partner_info_command(message: Message):
     if text is None:
         await message.answer(f"❌ Пользователь {target_id} не найден в базе данных.")
         return
-    if text == "not_partner":
-        await message.answer(
-            f"❌ Пользователь {target_id} не участвует в партнёрской программе "
-            f"(partner_flag = False)."
-        )
-        return
 
     await message.answer(text, parse_mode="HTML")
 
@@ -425,7 +417,7 @@ async def partner_remove_command(message: Message):
         return
 
     stats = await _partner_admin_stats_text(target_id)
-    if stats and stats != "not_partner":
+    if stats:
         await message.answer(
             f"✅ Списано <b>{amount} ₽</b> с баланса, добавлено в «Выведено».\n\n{stats}",
             parse_mode="HTML",

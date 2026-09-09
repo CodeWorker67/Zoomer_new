@@ -567,14 +567,6 @@ def keyboard_inline_ref(user_id):
     ])
 
 
-def keyboard_partner_intro():
-    return create_kb(
-        1,
-        partner_create_link='🔗 Создать партнёрскую ссылку',
-        back_to_earn=BTN_BACK,
-    )
-
-
 def keyboard_partner_dashboard():
     return create_kb(
         1,

@@ -9,7 +9,7 @@ from keyboard import (keyboard_start, keyboard_tariff_bonus, keyboard_tariff,
                       keyboard_sub_after_free, ref_keyboard, keyboard_gift_tariff,
                       keyboard_gift_tariff_repeat,
                       keyboard_payment_method, keyboard_payment_method_stock, chanel_keyboard, create_kb,
-                      keyboard_inline_ref, keyboard_partner_intro, keyboard_partner_dashboard,
+                      keyboard_inline_ref, keyboard_partner_dashboard,
                       keyboard_partner_withdraw, keyboard_buy_menu, keyboard_earn_with_us,
                       OPEN_SITE_CB, SITE_URL,
                       keyboard_trial_existing_expired, keyboard_subscription_manage,
@@ -188,8 +188,12 @@ async def process_start_command(message: Message, command: Command):
                     f'зашел в бота в первый раз по партнёрской ссылке'
                 )
                 raw_partner = start_arg.replace('partner_', '', 1)
-                if raw_partner.isdigit() and raw_partner != str(message.from_user.id):
-                    partner_login = raw_partner
+                try:
+                    partner_pid = int(raw_partner)
+                except ValueError:
+                    partner_pid = None
+                if partner_pid is not None and partner_pid != message.from_user.id:
+                    partner_login = str(partner_pid)
 
         elif start_arg.startswith('ref'):
             if user_data:
@@ -644,6 +648,7 @@ async def _send_partner_dashboard(callback: CallbackQuery) -> None:
         lexicon['partner_dashboard'].format(
             link=link,
             procent=PARTNER_PROCENT,
+            min_sum=PARTNER_MIN,
             referrals=referrals,
             payments_sum=payments_sum,
             total_earned=total_earned,
@@ -658,27 +663,6 @@ async def _send_partner_dashboard(callback: CallbackQuery) -> None:
 async def partner_program(callback: CallbackQuery):
     await callback.answer()
     await _ensure_user_exists(callback.from_user.id)
-    user = await sql.get_user_object_by_user_id(callback.from_user.id)
-
-    if user and user.partner_flag:
-        await _send_partner_dashboard(callback)
-    else:
-        await edit_or_send_photo(
-            callback,
-            "earn_with_us",
-            lexicon['partner_intro'].format(
-                procent=PARTNER_PROCENT,
-                min_sum=PARTNER_MIN,
-            ),
-            keyboard_partner_intro(),
-        )
-
-
-@router.callback_query(F.data == 'partner_create_link')
-async def partner_create_link(callback: CallbackQuery):
-    await callback.answer()
-    await _ensure_user_exists(callback.from_user.id)
-    await sql.update_partner_flag(callback.from_user.id, True)
     await _send_partner_dashboard(callback)
 
 

@@ -4,7 +4,7 @@ from typing import Optional, Tuple
 
 from bot import x3, sql, bot
 
-from config import PARTNER_PROCENT, LEAD_TRACKER_STAR_RUB_PER_STAR, CHECKER_ID
+from config import PARTNER_PROCENT, LANDING_PARTNER_PROCENT, LEAD_TRACKER_STAR_RUB_PER_STAR, CHECKER_ID
 from config_bd.utils import _norm_email, _payload_duration_to_panel_days
 from lead_tracker import post_payment_success
 from X3 import panel_username_for_site_user
@@ -51,11 +51,12 @@ async def _credit_partner_commission(payer_uid: int, method: str, amount: int | 
         if not partner_str:
             return
         partner_id = int(partner_str)
-        if partner_id <= 0 or partner_id == payer_uid:
+        if partner_id == payer_uid:
             return
 
         rub = _payment_rub_for_partner(method, amount)
-        commission = rub * PARTNER_PROCENT // 100
+        procent = LANDING_PARTNER_PROCENT if partner_id < 0 else PARTNER_PROCENT
+        commission = rub * procent // 100
         if commission <= 0:
             return
 
@@ -64,20 +65,21 @@ async def _credit_partner_commission(payer_uid: int, method: str, amount: int | 
             logger.warning("Партнёр {} не найден, начисление {} ₽ пропущено", partner_id, commission)
             return
 
-        try:
-            await bot.send_message(
-                chat_id=partner_id,
-                text=lexicon["partner_success"].format(commission),
-                reply_markup=create_kb(1, back_to_main="🔙 Назад"),
-            )
-            logger.info(
-                "✅ Партнёру {} начислено {} ₽ за оплату пользователя {}",
-                partner_id,
-                commission,
-                payer_uid,
-            )
-        except Exception as e:
-            logger.error("❌ Ошибка уведомления партнёра {}: {}", partner_id, e)
+        if partner_id > 0:
+            try:
+                await bot.send_message(
+                    chat_id=partner_id,
+                    text=lexicon["partner_success"].format(commission),
+                    reply_markup=create_kb(1, back_to_main="🔙 Назад"),
+                )
+            except Exception as e:
+                logger.error("❌ Ошибка уведомления партнёра {}: {}", partner_id, e)
+        logger.info(
+            "✅ Партнёру {} начислено {} ₽ за оплату пользователя {}",
+            partner_id,
+            commission,
+            payer_uid,
+        )
     except (ValueError, TypeError) as e:
         logger.error("❌ Ошибка начисления партнёрского вознаграждения: {}", e)
 

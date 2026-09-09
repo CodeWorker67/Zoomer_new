@@ -20,12 +20,16 @@ from lead_tracker import post_user_trial
 from X3 import panel_username_for_site_user
 from config import (
     ADMIN_IDS,
+    BOT_URL,
     JWT_SECRET,
     LANDING_GOOGLE_CLIENT_ID,
+    LANDING_PARTNER_MIN,
+    LANDING_PARTNER_PROCENT,
     LANDING_SITE_URL,
     PAYMENT_MAX_PENDING_PER_USER,
     PLATEGA_API_KEY,
     PLATEGA_MERCHANT_ID,
+    SUPPORT_URL,
 )
 from config_bd.utils import _norm_email
 from lexicon import dct_desc, dct_price, lexicon
@@ -40,12 +44,13 @@ LANDING_JWT_MAX_AGE = 365 * 24 * 3600  # 1 year
 LANDING_COOKIE = "landing_auth"
 
 TARIFF_PUBLIC = [
-    ("7", "7 дней", 5, False),
-    ("30", "30 дней", 5, False),
-    ("90", "90 дней", 5, False),
-    ("180", "180 дней", 5, False),
-    ("365", "365 дней", 5, False),
     ("5000", "Навсегда", 5, False),
+    ("730", "2 года", 5, False),
+    ("365", "365 дней", 5, False),
+    ("180", "180 дней", 5, False),
+    ("90", "90 дней", 5, False),
+    ("30", "30 дней", 5, False),
+    ("7", "7 дней", 5, False),
 ]
 
 _rate_limits: dict[str, list[float]] = {}
@@ -271,8 +276,25 @@ async def _landing_panel_username(ctx: LandingCtx) -> str:
     return panel_username_for_site_user(int(user.user_id), False)
 
 
+def _parse_partner_ref(raw: Optional[str]) -> Optional[str]:
+    """Парсит partner id из ?start=partner_{id} или голого id."""
+    if not raw:
+        return None
+    value = str(raw).strip()
+    if value.startswith("partner_"):
+        value = value.replace("partner_", "", 1)
+    try:
+        pid = int(value)
+    except ValueError:
+        return None
+    if pid == 0:
+        return None
+    return str(pid)
+
+
 class EmailIn(BaseModel):
     email: EmailStr
+    partner: Optional[str] = None
 
 
 class VerifyCodeIn(BaseModel):
@@ -282,6 +304,7 @@ class VerifyCodeIn(BaseModel):
 
 class GoogleAuthIn(BaseModel):
     credential: str
+    partner: Optional[str] = None
 
 
 class CreatePaymentIn(BaseModel):
@@ -339,7 +362,13 @@ async def landing_send_code(body: EmailIn, request: Request):
     em = str(body.email).strip().lower()
     existing = await sql.get_landing_user_by_email(em)
     if existing is None:
-        await sql.register_landing_email_user(em, site_url=_site_url_from_request(request))
+        partner_raw = body.partner or request.query_params.get("start")
+        partner = _parse_partner_ref(partner_raw) or ""
+        await sql.register_landing_email_user(
+            em,
+            site_url=_site_url_from_request(request),
+            partner=partner,
+        )
     await _send_landing_otp(em)
     return {"success": True, "email": em}
 
@@ -408,8 +437,13 @@ async def landing_google(body: GoogleAuthIn, request: Request):
             user, site = by_email
             internal_id = int(user.id)
         else:
+            partner_raw = body.partner or request.query_params.get("start")
+            partner = _parse_partner_ref(partner_raw) or ""
             internal_id = await sql.register_landing_google_user(
-                em, google_sub, site_url=_site_url_from_request(request)
+                em,
+                google_sub,
+                site_url=_site_url_from_request(request),
+                partner=partner,
             )
             pair = await sql.get_landing_user_by_internal_id(internal_id)
             if pair is None:
@@ -643,3 +677,34 @@ async def landing_payment_status(ctx: LandingCtx, transaction_id: str):
     if st is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Payment not found")
     return {"status": st}
+
+
+@landing_router.get("/user/partner")
+async def landing_user_partner(ctx: LandingCtx, request: Request):
+    user, _site = await _landing_user_pair(ctx)
+    billing_uid = int(user.user_id)
+    referrals = await sql.select_partner_count(billing_uid)
+    payments_sum = await sql.select_partner_referrals_payments_sum(billing_uid)
+    balance = user.partner_balance or 0
+    paid_out = user.partner_pay or 0
+    total_earned = balance + paid_out
+    site_base = (_site_url_from_request(request) or LANDING_SITE_URL).rstrip("/")
+    partner_code = str(billing_uid)
+    site_link = f"{site_base}/?start=partner_{partner_code}"
+    telegram_link = f"{BOT_URL}?start=partner_{partner_code}"
+    referrals_list = await sql.select_partner_referrals_list(billing_uid)
+    return {
+        "referrals": referrals,
+        "payments_sum": payments_sum,
+        "balance": balance,
+        "paid_out": paid_out,
+        "total_earned": total_earned,
+        "percent": LANDING_PARTNER_PROCENT,
+        "min_withdraw": LANDING_PARTNER_MIN,
+        "can_withdraw": balance >= LANDING_PARTNER_MIN,
+        "partner_code": partner_code,
+        "site_link": site_link,
+        "telegram_link": telegram_link,
+        "support_url": SUPPORT_URL,
+        "referrals_list": referrals_list,
+    }

@@ -500,14 +500,22 @@ class AsyncSQL:
             return int(m) - 1
 
     async def register_landing_email_user(
-        self, email: str, stamp: str = "", site_url: Optional[str] = None
+        self,
+        email: str,
+        stamp: str = "",
+        site_url: Optional[str] = None,
+        partner: str = "",
     ) -> int:
         em = _norm_email(email)
         uid = await self.next_landing_user_id()
+        partner_val = partner or None
+        if partner_val and str(partner_val) == str(uid):
+            partner_val = None
         async with self.session_factory() as session:
             u = Users(
                 user_id=uid,
                 stamp=stamp,
+                partner=partner_val,
                 create_user=_naive_utc(datetime.now(timezone.utc)),
             )
             session.add(u)
@@ -525,14 +533,23 @@ class AsyncSQL:
             return int(u.id)
 
     async def register_landing_google_user(
-        self, email: str, google_sub: str, stamp: str = "", site_url: Optional[str] = None
+        self,
+        email: str,
+        google_sub: str,
+        stamp: str = "",
+        site_url: Optional[str] = None,
+        partner: str = "",
     ) -> int:
         em = _norm_email(email)
         uid = await self.next_landing_user_id()
+        partner_val = partner or None
+        if partner_val and str(partner_val) == str(uid):
+            partner_val = None
         async with self.session_factory() as session:
             u = Users(
                 user_id=uid,
                 stamp=stamp,
+                partner=partner_val,
                 create_user=_naive_utc(datetime.now(timezone.utc)),
             )
             session.add(u)
@@ -1052,6 +1069,38 @@ class AsyncSQL:
                     val = (await session.execute(stmt_sum)).scalar() or 0
                     total += int(val)
             return total
+
+    async def select_partner_referrals_list(self, partner_id: int, limit: int = 50) -> list[dict]:
+        """Список приглашённых по partner_id (для ЛК landing)."""
+        async with self.session_factory() as session:
+            stmt = (
+                select(Users.user_id, Users.create_user, Users.in_panel, SecondSite.email)
+                .outerjoin(SecondSite, SecondSite.tg_id == Users.user_id)
+                .where(Users.partner == str(partner_id))
+                .order_by(Users.create_user.desc())
+                .limit(limit)
+            )
+            result = await session.execute(stmt)
+            rows = result.all()
+            out: list[dict] = []
+            for uid, created, in_panel, email in rows:
+                paid_sum = 0
+                for model in _MERGE_PAYMENT_MODELS:
+                    stmt_sum = select(func.coalesce(func.sum(model.amount), 0)).where(
+                        model.user_id == uid,
+                        model.status.in_(_BILLING_OK_STATUSES),
+                    )
+                    paid_sum += int((await session.execute(stmt_sum)).scalar() or 0)
+                out.append(
+                    {
+                        "user_id": int(uid),
+                        "email": email,
+                        "registered_at": created.isoformat() if created else None,
+                        "has_subscription": bool(in_panel),
+                        "payments_sum": paid_sum,
+                    }
+                )
+            return out
 
     async def update_partner_flag(self, user_id: int, flag: bool = True) -> None:
         async with self.session_factory() as session:
@@ -1933,7 +1982,9 @@ class AsyncSQL:
         """
         if arg.startswith('partner_'):
             partner_id = arg.replace('partner_', '', 1)
-            if not partner_id.isdigit():
+            try:
+                int(partner_id)
+            except ValueError:
                 return None, None, None, None, None, None, None, None, None
             users = await self.SELECT_USERS_BY_PARAMETER('partner', partner_id)
             source = 'partner'

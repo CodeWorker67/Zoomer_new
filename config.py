@@ -35,6 +35,8 @@ SHORT_UUID_SECRET: Optional[str] = os.environ.get("SHORT_UUID_SECRET")
 BOT_URL: str = os.environ.get("BOT_URL") or "https://t.me/zoomerskyvpn_bot"
 PARTNER_PROCENT: int = int(os.environ.get("PARTNER_PROCENT", "20"))
 PARTNER_MIN: int = int(os.environ.get("PARTNER_MIN", "500"))
+LANDING_PARTNER_PROCENT: int = int(os.environ.get("LANDING_PARTNER_PROCENT", "50"))
+LANDING_PARTNER_MIN: int = int(os.environ.get("LANDING_PARTNER_MIN", "2000"))
 SUPPORT_URL: str = (
     os.environ.get("SUPPORT_URL")
     or os.environ.get("PARTNER_SUPPORT_URL")

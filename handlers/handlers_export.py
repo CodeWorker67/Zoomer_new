@@ -12,7 +12,15 @@ from openpyxl.styles import Alignment, Border, Side, PatternFill
 
 from bot import bot, sql, x3
 from config import ADMIN_IDS
-from config_bd.models import Users, FirstSite
+from config_bd.models import (
+    Users,
+    FirstSite,
+    SecondSite,
+    WlTrafficMeta,
+    LinkingCodes,
+    PasswordResetCodes,
+    PartnerBotApplications,
+)
 from config_bd.utils import (
     _billing_duration_from_amount_fallback,
     _parse_traffic_duration,
@@ -77,7 +85,13 @@ _USERS_EXPORT_COLUMNS_DEFAULT = (
 )
 
 
-def _first_site_sheet_column_names(users_full_columns: bool) -> list[str]:
+def _model_column_names(model) -> list[str]:
+    return [c.key for c in model.__table__.columns]
+
+
+def _first_site_sheet_column_names(*, users_full_columns: bool, users_all_columns: bool) -> list[str]:
+    if users_all_columns:
+        return _model_column_names(FirstSite)
     if users_full_columns:
         return [
             c.key
@@ -87,7 +101,9 @@ def _first_site_sheet_column_names(users_full_columns: bool) -> list[str]:
     return ["tg_id", "email", "field_bool_1"]
 
 
-def _user_sheet_column_names(users_full_columns: bool) -> list[str]:
+def _user_sheet_column_names(*, users_full_columns: bool, users_all_columns: bool) -> list[str]:
+    if users_all_columns:
+        return _model_column_names(Users)
     if users_full_columns:
         return [
             c.key
@@ -107,13 +123,42 @@ def _excel_scalar(value):
     return value
 
 
+def _write_orm_sheet(
+    wb,
+    *,
+    title: str,
+    rows,
+    columns: list[str],
+    header_alignment,
+    thin_border,
+):
+    ws = wb.create_sheet(title=title)
+    for col_num, name in enumerate(columns, 1):
+        cell = ws.cell(row=1, column=col_num, value=name)
+        cell.alignment = header_alignment
+        cell.border = thin_border
+    for row_num, obj in enumerate(rows, 2):
+        for col_num, name in enumerate(columns, 1):
+            cell = ws.cell(row=row_num, column=col_num, value=_excel_scalar(getattr(obj, name)))
+            cell.border = thin_border
+    for col in ws.columns:
+        max_len = 0
+        col_letter = col[0].column_letter
+        for cell in col:
+            if cell.value:
+                max_len = max(max_len, len(str(cell.value)))
+        ws.column_dimensions[col_letter].width = min(max_len + 2, _EXCEL_COL_WIDTH_MAX)
+    return ws
+
+
 async def _export_database_to_excel_impl(
     message: Message,
     *,
-    users_full_columns: bool,
+    users_full_columns: bool = False,
+    users_all_columns: bool = False,
     include_users: bool = True,
 ) -> None:
-    """Экспорт базы в Excel; при users_full_columns на листе users почти все колонки (без чувствительных)."""
+    """Экспорт базы в Excel; users_all_columns — все колонки users (/export), users_full_columns — для партнёра."""
     if message.from_user.id not in ADMIN_IDS:
         await message.answer("❌ Эта команда доступна только администраторам.")
         return
@@ -121,6 +166,8 @@ async def _export_database_to_excel_impl(
     try:
         if not include_users:
             start_msg = "🔄 Начинаю быстрый экспорт (без таблицы users)..."
+        elif users_all_columns:
+            start_msg = "🔄 Начинаю полный экспорт базы данных (все таблицы, все поля users)..."
         elif users_full_columns:
             start_msg = "🔄 Начинаю экспорт базы данных (лист users — для партнёра)..."
         else:
@@ -140,6 +187,11 @@ async def _export_database_to_excel_impl(
             payments_fk_sbp_list = snapshot["payments_fk_sbp"]
             payments_stars_list = snapshot["payments_stars"]
             payments_cryptobot_list = snapshot["payments_cryptobot"]
+            second_site_list = snapshot["second_site"]
+            wl_traffic_meta_list = snapshot["wl_traffic_meta"]
+            linking_codes_list = snapshot["linking_codes"]
+            password_reset_codes_list = snapshot["password_reset_codes"]
+            partner_bot_applications_list = snapshot["partner_bot_applications"]
             gifts_list = snapshot["gifts"]
             online_list = snapshot["online"]
             white_counter_list = snapshot["white_counter"]
@@ -157,7 +209,10 @@ async def _export_database_to_excel_impl(
             if include_users:
                 # --- Лист USERS ---
                 ws_users = wb.create_sheet(title="users")
-                users_columns = _user_sheet_column_names(users_full_columns)
+                users_columns = _user_sheet_column_names(
+                    users_full_columns=users_full_columns,
+                    users_all_columns=users_all_columns,
+                )
 
                 for col_num, title in enumerate(users_columns, 1):
                     cell = ws_users.cell(row=1, column=col_num, value=title)
@@ -179,7 +234,10 @@ async def _export_database_to_excel_impl(
                     ws_users.column_dimensions[col_letter].width = min(max_len + 2, _EXCEL_COL_WIDTH_MAX)
 
                 ws_first_site = wb.create_sheet(title="first_site")
-                first_site_columns = _first_site_sheet_column_names(users_full_columns)
+                first_site_columns = _first_site_sheet_column_names(
+                    users_full_columns=users_full_columns,
+                    users_all_columns=users_all_columns,
+                )
                 for col_num, title in enumerate(first_site_columns, 1):
                     cell = ws_first_site.cell(row=1, column=col_num, value=title)
                     cell.alignment = header_alignment
@@ -503,10 +561,54 @@ async def _export_database_to_excel_impl(
                         max_len = max(max_len, len(str(cell.value)))
                 ws_white_counter.column_dimensions[col_letter].width = min(max_len + 2, _EXCEL_COL_WIDTH_MAX)
 
+            extra_sheets = [
+                _write_orm_sheet(
+                    wb,
+                    title="second_site",
+                    rows=second_site_list,
+                    columns=_model_column_names(SecondSite),
+                    header_alignment=header_alignment,
+                    thin_border=thin_border,
+                ),
+                _write_orm_sheet(
+                    wb,
+                    title="wl_traffic_meta",
+                    rows=wl_traffic_meta_list,
+                    columns=_model_column_names(WlTrafficMeta),
+                    header_alignment=header_alignment,
+                    thin_border=thin_border,
+                ),
+                _write_orm_sheet(
+                    wb,
+                    title="linking_codes",
+                    rows=linking_codes_list,
+                    columns=_model_column_names(LinkingCodes),
+                    header_alignment=header_alignment,
+                    thin_border=thin_border,
+                ),
+                _write_orm_sheet(
+                    wb,
+                    title="password_reset_codes",
+                    rows=password_reset_codes_list,
+                    columns=_model_column_names(PasswordResetCodes),
+                    header_alignment=header_alignment,
+                    thin_border=thin_border,
+                ),
+                _write_orm_sheet(
+                    wb,
+                    title="partner_bot_applications",
+                    rows=partner_bot_applications_list,
+                    columns=_model_column_names(PartnerBotApplications),
+                    header_alignment=header_alignment,
+                    thin_border=thin_border,
+                ),
+            ]
+
             # Заморозка заголовков
             sheets_to_freeze = [
                 ws_payments, ws_payments_cards, ws_payments_stars, ws_platega_crypto,
                 ws_fk_sbp, ws_wata_sbp, ws_wata_card, ws_payments_cryptobot, ws_gifts, ws_online, ws_white_counter,
+                *extra_sheets,
             ]
             if ws_users is not None:
                 sheets_to_freeze.insert(0, ws_users)
@@ -559,6 +661,8 @@ async def _export_database_to_excel_impl(
             now_s = datetime.now().strftime('%d.%m.%Y %H:%M')
             if not include_users:
                 users_sheet_note = "⚡ Без таблицы <code>users</code>.\n"
+            elif users_all_columns:
+                users_sheet_note = "🧾 Лист <code>users</code>: все колонки таблицы.\n"
             elif users_full_columns:
                 users_sheet_note = (
                     "🧾 Лист <code>users</code>: расширенный набор колонок (без паролей и служебных полей).\n"
@@ -611,8 +715,8 @@ async def _export_database_to_excel_impl(
 
 @router.message(Command(commands=["export"]))
 async def export_database_to_excel(message: Message):
-    """Экспорт базы данных в Excel файл."""
-    await _export_database_to_excel_impl(message, users_full_columns=False)
+    """Полный экспорт базы данных в Excel: все таблицы, все поля users."""
+    await _export_database_to_excel_impl(message, users_all_columns=True)
 
 
 @router.message(Command(commands=["export_partner"]))

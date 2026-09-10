@@ -25,6 +25,7 @@ from config_bd.models import (
     LinkingCodes,
     PasswordResetCodes,
     WlTrafficMeta,
+    PartnerBotApplications,
 )
 from lexicon import dct_price
 from logging_config import logger
@@ -3137,9 +3138,31 @@ class AsyncSQL:
             gifts_list = (await session.execute(select(Gifts))).scalars().all()
             online_list = (await session.execute(select(Online))).scalars().all()
             white_counter_list = (await session.execute(select(WhiteCounter))).scalars().all()
+            second_site_list = (
+                await session.execute(select(SecondSite).order_by(SecondSite.tg_id.asc()))
+            ).scalars().all()
+            wl_traffic_meta_list = (await session.execute(select(WlTrafficMeta))).scalars().all()
+            linking_codes_list = (
+                await session.execute(select(LinkingCodes).order_by(LinkingCodes.code_id.asc()))
+            ).scalars().all()
+            password_reset_codes_list = (
+                await session.execute(
+                    select(PasswordResetCodes).order_by(PasswordResetCodes.pass_id.asc())
+                )
+            ).scalars().all()
+            partner_bot_applications_list = (
+                await session.execute(
+                    select(PartnerBotApplications).order_by(PartnerBotApplications.id.asc())
+                )
+            ).scalars().all()
         return {
             "users": users_list,
             "first_site": first_site_list,
+            "second_site": second_site_list,
+            "wl_traffic_meta": wl_traffic_meta_list,
+            "linking_codes": linking_codes_list,
+            "password_reset_codes": password_reset_codes_list,
+            "partner_bot_applications": partner_bot_applications_list,
             "payments": payments_list,
             "payments_cards": payments_cards_list,
             "payments_platega_crypto": payments_platega_crypto_list,

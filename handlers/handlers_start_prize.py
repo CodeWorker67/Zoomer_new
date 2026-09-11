@@ -13,7 +13,7 @@ from keyboard import (
     keyboard_tariff,
     keyboard_tariff_bonus,
 )
-from lexicon import lexicon
+from lexicon import buy_caption, lexicon
 from logging_config import logger
 from telegram_ids import is_telegram_chat_id
 from utils.menu_photos import menu_photo
@@ -60,11 +60,12 @@ async def _buy_self_keyboard(uid: int):
 
 
 async def _show_buy_self(callback: CallbackQuery) -> None:
-    kb = await _buy_self_keyboard(callback.from_user.id)
+    uid = callback.from_user.id
+    kb = await _buy_self_keyboard(uid)
     await edit_or_send_photo(
         callback,
         "buy_subscription",
-        lexicon["buy"],
+        buy_caption(is_admin=uid in ADMIN_IDS),
         kb,
     )
 

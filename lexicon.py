@@ -656,6 +656,21 @@ def _gift_benefit_pct(duration_key: str, price: int) -> int | None:
     return round((base - price) / base * 100)
 
 
+_ADMIN_BUY_LOTTERY_LINE = (
+    '🎟️Покупая любой тариф, вы автоматически участвуете в розыгрыше более 100 призов🎟️'
+)
+
+
+def buy_caption(*, is_admin: bool = False) -> str:
+    text = lexicon['buy']
+    if not is_admin:
+        return text
+    return text.replace(
+        '⬇️ Выберите тариф ⬇️',
+        f'{_ADMIN_BUY_LOTTERY_LINE}\n\n⬇️ Выберите тариф ⬇️',
+    )
+
+
 def format_gift_tariff_label(duration_key: str, *, repeat_giver: bool) -> str:
     price = resolve_gift_price(duration_key, repeat_giver=repeat_giver)
     icon = _GIFT_TARIFF_ICONS.get(duration_key, '')

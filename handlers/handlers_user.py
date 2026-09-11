@@ -48,7 +48,7 @@ from aiogram.types import (
     InlineKeyboardButton,
 )
 from aiogram.filters import BaseFilter, ChatMemberUpdatedFilter, KICKED, MEMBER, Command
-from lexicon import lexicon
+from lexicon import buy_caption, lexicon
 from wl_traffic.service import (
     credit_wl_subscription_bonus,
     fetch_panel_user,
@@ -372,7 +372,7 @@ async def buy_vpn_self_cb(callback: CallbackQuery):
     await edit_or_send_photo(
         callback,
         "buy_subscription",
-        lexicon['buy'],
+        buy_caption(is_admin=is_admin),
         kb,
     )
 

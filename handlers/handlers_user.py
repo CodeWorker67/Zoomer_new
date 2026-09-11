@@ -9,8 +9,9 @@ from keyboard import (keyboard_start, keyboard_tariff_bonus, keyboard_tariff,
                       keyboard_sub_after_free, ref_keyboard, keyboard_gift_tariff,
                       keyboard_gift_tariff_repeat,
                       keyboard_payment_method, keyboard_payment_method_stock, chanel_keyboard, create_kb,
-                      keyboard_inline_ref, keyboard_partner_dashboard,
-                      keyboard_partner_withdraw, keyboard_buy_menu, keyboard_earn_with_us,
+                      keyboard_inline_ref, keyboard_inline_partner, keyboard_partner_dashboard,
+                      keyboard_partner_withdraw, partner_bot_link, partner_site_link,
+                      keyboard_buy_menu, keyboard_earn_with_us,
                       OPEN_SITE_CB, SITE_URL,
                       keyboard_trial_existing_expired, keyboard_subscription_manage,
                       keyboard_sub_after_buy,
@@ -75,7 +76,7 @@ async def _show_main_menu(
     user = source.from_user
     user_data = await sql.get_user(user.id)
     fullname = user.full_name or user.first_name or "Пользователь"
-    caption = profile_caption(fullname, user_data)
+    caption = await profile_caption(fullname, user_data, user.id)
     in_panel = bool(user_data and user_data[4])
     active = has_active_subscription(user_data)
 
@@ -640,13 +641,20 @@ async def _send_partner_dashboard(callback: CallbackQuery) -> None:
     balance = user.partner_balance or 0
     paid_out = user.partner_pay or 0
     total_earned = balance + paid_out
-    link = f"{BOT_URL}?start=partner_{tg_id}"
+    bot_link = partner_bot_link(tg_id)
+    site_link = partner_site_link(tg_id)
+    site_block = (
+        f'🌐 <b>Сайт:</b>\n└ <code>{site_link}</code>\n\n'
+        if site_link
+        else ""
+    )
 
     await edit_or_send_photo(
         callback,
         "earn_with_us",
         lexicon['partner_dashboard'].format(
-            link=link,
+            bot_link=bot_link,
+            site_block=site_block,
             procent=PARTNER_PROCENT,
             min_sum=PARTNER_MIN,
             referrals=referrals,
@@ -655,7 +663,7 @@ async def _send_partner_dashboard(callback: CallbackQuery) -> None:
             paid_out=paid_out,
             balance=balance,
         ),
-        keyboard_partner_dashboard(),
+        keyboard_partner_dashboard(tg_id),
     )
 
 
@@ -898,25 +906,30 @@ async def process_account_linking_code(message: Message):
 @router.inline_query(lambda query: query.query == 'partner')
 async def inline_partner(inline_query: InlineQuery):
     user_id = inline_query.from_user.id
+    bot_link = partner_bot_link(user_id)
+    site_link = partner_site_link(user_id)
+    site_line = f'\n🌐 Сайт: {site_link}' if site_link else ''
 
     text = f'''
-Привет. Подключись к VPN по моей ссылке:
+Привет. Подключись к <b>Зумерскому VPN</b> по моей партнёрской ссылке:
 
-https://t.me/zoomerskyvpn_bot?start=ref{user_id}
+🤖 Бот: {bot_link}{site_line}
 
-🚀Работает быстро и стабильно.
+🚀 Высокая скорость канала, надёжные сервера
+🛡 Защита данных, без искусственных лимитов по трафику
+📱 До 5 устройств одновременно
     '''
 
     result = InlineQueryResultArticle(
         id="1",
-        title='🤝🤝🤝 Приглашение',
-        description="Друг, перешедший по этой кнопке станет Вашим рефералом.",
+        title='💸 Партнёрское приглашение',
+        description="Друг, перешедший по ссылке, станет вашим партнёрским рефералом.",
         input_message_content=InputTextMessageContent(
             message_text=text,
             parse_mode='HTML',
             disable_web_page_preview=False
         ),
-        reply_markup=keyboard_inline_ref(user_id),
+        reply_markup=keyboard_inline_partner(user_id),
         thumb_url="https://img.freepik.com/premium-photo/glowing-blue-neon-wifi-signal-icon-dark-background_989822-6238.jpg?semt=ais_hybrid"  # опционально: иконка
     )
 

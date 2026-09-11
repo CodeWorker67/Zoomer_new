@@ -3,7 +3,7 @@ from typing import List, Optional
 
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from config import BOT_URL
+from config import BOT_URL, PUBLIC_SITE_URL
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 STYLE_PRIMARY = "primary"
@@ -541,6 +541,42 @@ def keyboard_payment_stars(stars_amount):
     ])
 
 
+def _site_base_url() -> str:
+    return (PUBLIC_SITE_URL or SITE_URL or "").strip().rstrip("/")
+
+
+def partner_bot_link(user_id: int) -> str:
+    base = (BOT_URL or "").rstrip("/")
+    return f"{base}?start=partner_{user_id}"
+
+
+def partner_site_link(user_id: int) -> Optional[str]:
+    site = _site_base_url()
+    if not site:
+        return None
+    return f"{site}?start=partner_{user_id}"
+
+
+def partner_invite_share_text(user_id: int) -> str:
+    lines = [
+        "💸 Зумерский VPN — подключайся по моей партнёрской ссылке "
+        "к быстрому и надёжному VPN!",
+        "",
+        f"🤖 Бот: {partner_bot_link(user_id)}",
+    ]
+    site = partner_site_link(user_id)
+    if site:
+        lines.append(f"🌐 Сайт: {site}")
+    return "\n".join(lines)
+
+
+def partner_invite_share_url(user_id: int) -> str:
+    bot_link = partner_bot_link(user_id)
+    inner = urllib.parse.quote(bot_link, safe="")
+    text = urllib.parse.quote(partner_invite_share_text(user_id))
+    return f"https://t.me/share/url?url={inner}&text={text}"
+
+
 def ref_keyboard(user_id):
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -561,17 +597,49 @@ def keyboard_inline_ref(user_id):
         [
             InlineKeyboardButton(
                 text="🔗 Подключить VPN",
-                url=f"https://t.me/zoomerskyvpn_bot?start=ref{user_id}",
+                url=f"{BOT_URL}?start=ref{user_id}",
             )
         ]
     ])
 
 
-def keyboard_partner_dashboard():
-    return create_kb(
-        1,
-        partner_withdraw='💰 Создать заявку на вывод',
-        back_to_earn=BTN_BACK,
+def keyboard_inline_partner(user_id: int):
+    rows = [
+        [
+            InlineKeyboardButton(
+                text="🔗 Подключить VPN",
+                url=partner_bot_link(user_id),
+            )
+        ]
+    ]
+    site = partner_site_link(user_id)
+    if site:
+        rows.append([
+            InlineKeyboardButton(
+                text="🌐 Открыть сайт",
+                url=site,
+            )
+        ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def keyboard_partner_dashboard(user_id: int):
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Пригласить друзей 🌠",
+                    url=partner_invite_share_url(user_id),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="💰 Создать заявку на вывод",
+                    callback_data="partner_withdraw",
+                )
+            ],
+            [InlineKeyboardButton(text=BTN_BACK, callback_data="back_to_earn")],
+        ]
     )
 
 

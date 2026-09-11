@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from html import escape
 from typing import Optional, Union
 
 from aiogram.exceptions import TelegramBadRequest
@@ -90,9 +91,47 @@ def has_active_subscription(user_data: Optional[tuple]) -> bool:
     return aware > datetime.now(timezone.utc)
 
 
-def profile_caption(fullname: str, user_data: Optional[tuple]) -> str:
-    status = subscription_status_text(user_data)
-    return f"👤 {fullname}\n📲 {status}"
+def _slot_status_from_panel(panel_user: dict) -> str:
+    expiry_dt = x3._panel_expire_at(panel_user)
+    if expiry_dt is None:
+        return "Нет подписки"
+    if is_forever_end_date(expiry_dt):
+        return "Активна навсегда ♾️"
+    if expiry_dt.tzinfo is None:
+        aware = expiry_dt.replace(tzinfo=timezone.utc)
+    else:
+        aware = expiry_dt.astimezone(timezone.utc)
+    date_str = _format_date_msk(aware)
+    if aware > datetime.now(timezone.utc) and x3._panel_user_subscription_usable(panel_user):
+        return f"Активна до {date_str}"
+    return f"Истекла {date_str}"
+
+
+async def profile_caption(fullname: str, user_data: Optional[tuple], uid: int) -> str:
+    lines = [f"👤 {fullname}"]
+    for slot_key, suffix, label in x3.SUBSCRIPTION_SLOTS:
+        username = f"{uid}{suffix}"
+        panel_resp = await x3.get_user_by_username(username)
+        panel_user = x3._panel_user_from_response(panel_resp)
+
+        if panel_user and x3._panel_expire_at(panel_user):
+            status = _slot_status_from_panel(panel_user)
+        elif slot_key == "main":
+            status = subscription_status_text(user_data)
+        else:
+            status = "Нет подписки"
+
+        lines.append(f"📲 {label}: {status}")
+
+        show_link = bool(
+            panel_user and x3._panel_user_subscription_usable(panel_user)
+        ) or (slot_key == "main" and has_active_subscription(user_data))
+        if show_link:
+            sub_url = await x3.sublink(username)
+            if sub_url:
+                lines.append(f"<code>{escape(str(sub_url))}</code>")
+
+    return "\n".join(lines)
 
 
 async def sync_panel_user_to_db(uid: int) -> bool:

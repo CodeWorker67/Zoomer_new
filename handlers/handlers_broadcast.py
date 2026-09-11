@@ -78,6 +78,7 @@ CUSTOM_PRESETS = [
     ("wl_traffic_buy", "📦 Купить трафик", STYLE_SUCCESS),
     ("connect_vpn", "🔗 Подключить VPN", STYLE_PRIMARY),
     ("ref_invite", "Пригласить друзей🫶", STYLE_SUCCESS),
+    ("partner_earn", "💵Заработай с нами!", None),
     ("buy_gift", "🎁 Подарить подписку", STYLE_SUCCESS),
     ("r_7", "👌 7 дней — 99 руб", STYLE_PRIMARY),
     ("r_30", "🤝 30 дней — 299 руб", STYLE_PRIMARY),

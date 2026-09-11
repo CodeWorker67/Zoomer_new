@@ -366,6 +366,9 @@ async def _merge_user_paid_subscription_flags(session, user_id: int) -> Tuple[bo
 
 
 class AsyncSQL:
+    LANDING_USER_ID_START = -50001
+    FIRST_SITE_USER_ID_FLOOR = LANDING_USER_ID_START + 1  # -50000; ниже — только landing
+
     def __init__(self):
         self.session_factory = AsyncSessionLocal
 
@@ -421,11 +424,16 @@ class AsyncSQL:
 
     async def next_negative_user_id(self) -> int:
         """
-        Следующий отрицательный user_id для сайта. С панелью X-UI username ≥ 3 символов,
-        поэтому первый id — -10, далее не выдаём -1…-9 (строка «-N» короче 3 символов).
+        Следующий отрицательный user_id для first_site / gift.
+        Диапазон: -10 … FIRST_SITE_USER_ID_FLOOR (-50000); landing (-50001 и ниже) отдельно.
+        С панелью X-UI username ≥ 3 символов, поэтому не выдаём -1…-9.
         """
+        landing_start = self.LANDING_USER_ID_START
         async with self.session_factory() as session:
-            stmt = select(func.min(Users.user_id)).where(Users.user_id < 0)
+            stmt = select(func.min(Users.user_id)).where(
+                Users.user_id < 0,
+                Users.user_id > landing_start,
+            )
             result = await session.execute(stmt)
             m = result.scalar_one_or_none()
             if m is None:
@@ -433,6 +441,10 @@ class AsyncSQL:
             nxt = int(m) - 1
             while nxt < 0 and len(str(nxt)) < 3:
                 nxt -= 1
+            if nxt <= landing_start:
+                raise RuntimeError(
+                    f"first_site user_id pool exhausted (floor={self.FIRST_SITE_USER_ID_FLOOR})"
+                )
             return nxt
 
     async def register_email_user(
@@ -465,8 +477,6 @@ class AsyncSQL:
             await session.commit()
             await session.refresh(u)
             return int(u.id)
-
-    LANDING_USER_ID_START = -50001
 
     @staticmethod
     async def _second_site_for_tg_id(session, tg_id: int) -> Optional[SecondSite]:

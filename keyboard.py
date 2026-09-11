@@ -20,33 +20,29 @@ def create_kb(
     width: int,
     *,
     styles: Optional[dict[str, str]] = None,
+    icons: Optional[dict[str, str]] = None,
     **kwargs: str,
 ) -> InlineKeyboardMarkup:
     """
     Создает инлайн-клавиатуру. kwargs: callback_data -> текст кнопки.
     styles: callback_data -> 'primary' | 'success' | 'danger' (цвет кнопки в клиентах Telegram).
+    icons: callback_data -> icon_custom_emoji_id (кастомный эмодзи перед текстом кнопки).
     """
     kb_builder = InlineKeyboardBuilder()
     buttons: List[InlineKeyboardButton] = []
     style_map = styles or {}
+    icon_map = icons or {}
 
     for button_data, button_text in kwargs.items():
-        st = style_map.get(button_data)
-        if st:
-            buttons.append(
-                InlineKeyboardButton(
-                    text=button_text,
-                    callback_data=button_data,
-                    style=st,
-                )
-            )
-        else:
-            buttons.append(
-                InlineKeyboardButton(
-                    text=button_text,
-                    callback_data=button_data,
-                )
-            )
+        btn_kwargs: dict = {
+            'text': button_text,
+            'callback_data': button_data,
+        }
+        if icon_map.get(button_data):
+            btn_kwargs['icon_custom_emoji_id'] = icon_map[button_data]
+        if style_map.get(button_data):
+            btn_kwargs['style'] = style_map[button_data]
+        buttons.append(InlineKeyboardButton(**btn_kwargs))
 
     kb_builder.row(*buttons, width=width)
     return kb_builder.as_markup()
@@ -218,19 +214,20 @@ _USER_TARIFF_EMOJI = {
     '730': '🔥 ',
 }
 
-_ADMIN_TARIFF_EMOJI = {
-    '7': '',
-    '30': '1🎟️ ',
-    '90': '3🎟️ ',
-    '180': '6🎟️ ',
-    '365': '12🎟️ ',
-    '730': '24🎟️ ',
+_ADMIN_TARIFF_COUNTS = {
+    '30': '1 ',
+    '90': '3 ',
+    '180': '6 ',
+    '365': '12 ',
+    '730': '24 ',
 }
 
 
 def tariff_button_label(key: str, *, is_admin: bool = False) -> str:
-    prefix = _ADMIN_TARIFF_EMOJI[key] if is_admin else _USER_TARIFF_EMOJI[key]
-    return f'{prefix}{_TARIFF_LABELS[key]}'
+    if is_admin:
+        count = _ADMIN_TARIFF_COUNTS.get(key, '')
+        return f'{count}{_TARIFF_LABELS[key]}'
+    return f'{_USER_TARIFF_EMOJI[key]}{_TARIFF_LABELS[key]}'
 
 
 def _tariff_button_kwargs(*, is_admin: bool = False) -> dict[str, str]:
@@ -240,10 +237,27 @@ def _tariff_button_kwargs(*, is_admin: bool = False) -> dict[str, str]:
     }
 
 
-def keyboard_tariff_bonus(*, is_admin: bool = False):
+def _admin_tariff_button_icons() -> dict[str, str]:
+    from lexicon import TICKET_CUSTOM_EMOJI_ID
+
+    return {
+        f'r_{key}': TICKET_CUSTOM_EMOJI_ID
+        for key in _ADMIN_TARIFF_COUNTS
+    }
+
+
+def _tariff_kb(*, is_admin: bool = False, **extra: str) -> InlineKeyboardMarkup:
     return create_kb(
         1,
+        icons=_admin_tariff_button_icons() if is_admin else None,
         **_tariff_button_kwargs(is_admin=is_admin),
+        **extra,
+    )
+
+
+def keyboard_tariff_bonus(*, is_admin: bool = False):
+    return _tariff_kb(
+        is_admin=is_admin,
         free_vpn='🔥ПОПРОБОВАТЬ 1 день БЕСПЛАТНО🔥',
         wl_traffic_buy_sub='📦 Купить трафик Антиглушилка',
         back_to_buy_menu='🔙 Назад',
@@ -251,18 +265,16 @@ def keyboard_tariff_bonus(*, is_admin: bool = False):
 
 
 def keyboard_tariff(*, is_admin: bool = False):
-    return create_kb(
-        1,
-        **_tariff_button_kwargs(is_admin=is_admin),
+    return _tariff_kb(
+        is_admin=is_admin,
         wl_traffic_buy_sub='📦 Купить трафик Антиглушилка',
         back_to_buy_menu='🔙 Назад',
     )
 
 
 def keyboard_tariff_trial(*, is_admin: bool = False):
-    return create_kb(
-        1,
-        **_tariff_button_kwargs(is_admin=is_admin),
+    return _tariff_kb(
+        is_admin=is_admin,
         wl_traffic_buy_sub='📦 Купить трафик Антиглушилка',
         back_to_buy_menu='🔙 Назад',
     )

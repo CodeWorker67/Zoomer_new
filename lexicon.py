@@ -656,8 +656,12 @@ def _gift_benefit_pct(duration_key: str, price: int) -> int | None:
     return round((base - price) / base * 100)
 
 
+TICKET_CUSTOM_EMOJI_ID = '5269265581827204458'
+TICKET_EMOJI_HTML = f'<tg-emoji emoji-id="{TICKET_CUSTOM_EMOJI_ID}">🎟️</tg-emoji>'
+
 _ADMIN_BUY_LOTTERY_LINE = (
-    '🎟️Покупая любой тариф, вы автоматически участвуете в розыгрыше более 100 призов🎟️'
+    f'{TICKET_EMOJI_HTML}Покупая любой тариф, вы автоматически участвуете '
+    f'в розыгрыше более 100 призов{TICKET_EMOJI_HTML}'
 )
 
 

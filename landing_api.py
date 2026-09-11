@@ -1,6 +1,7 @@
 """Landing site API — /api/landing/* (OTP email, Google, tariffs, payments)."""
 from __future__ import annotations
 
+import re
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
@@ -26,16 +27,19 @@ from config import (
     LANDING_PARTNER_MIN,
     LANDING_PARTNER_PROCENT,
     LANDING_SITE_URL,
+    LOGINBOT_API_KEY,
     PAYMENT_MAX_PENDING_PER_USER,
     PLATEGA_API_KEY,
     PLATEGA_MERCHANT_ID,
     SUPPORT_URL,
+    WEB_API_PUBLIC_URL,
 )
 from config_bd.utils import _norm_email
 from lexicon import dct_desc, dct_price, lexicon
 from logging_config import logger
 from payments.payload_source import SITE
 from payments.pay_platega import pay_site_card, pay_site_sbp
+from services.loginbot import LOGINBOT_DEFAULT_TIMEOUT, LoginBotError, start_call_auth
 from services.unisender import send_email as send_unisender_email
 
 landing_router = APIRouter(prefix="/api/landing", tags=["landing"])
@@ -54,7 +58,9 @@ TARIFF_PUBLIC = [
 ]
 
 _rate_limits: dict[str, list[float]] = {}
+_phone_auth_sessions: dict[str, dict[str, Any]] = {}
 bearer_scheme = HTTPBearer(auto_error=False)
+PHONE_SESSION_TTL = LOGINBOT_DEFAULT_TIMEOUT + 120
 
 
 def _rate_check(key: str, max_requests: int, window_sec: int) -> bool:
@@ -184,7 +190,7 @@ async def get_landing_jwt_context(
     else:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")
     auth = payload.get("auth") or "email"
-    if auth not in ("email", "google"):
+    if auth not in ("email", "google", "phone"):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")
     return {"user_id": uid, "username": payload.get("username"), "auth": auth}
 
@@ -216,14 +222,78 @@ async def _send_landing_otp(email: str) -> None:
         ) from e
 
 
+def _landing_auth_type(site) -> str:
+    if site.google_sub:
+        return "google"
+    if getattr(site, "phone", None):
+        return "phone"
+    return "email"
+
+
 def _landing_user_dict(user, site) -> dict[str, Any]:
     return {
         "id": int(user.id),
         "email": site.email,
-        "auth": "google" if site.google_sub else "email",
+        "phone": getattr(site, "phone", None),
+        "auth": _landing_auth_type(site),
         "billing_user_id": int(user.user_id),
         "has_password": bool(site.password),
     }
+
+
+def _normalize_phone(raw: str) -> str:
+    digits = re.sub(r"\D", "", raw or "")
+    if len(digits) == 11 and digits.startswith("8"):
+        digits = "7" + digits[1:]
+    if len(digits) == 10:
+        digits = "7" + digits
+    if len(digits) != 11 or not digits.startswith("7"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Неверный номер телефона")
+    return digits
+
+
+def _format_phone_display(phone: str) -> str:
+    if len(phone) == 11 and phone.startswith("7"):
+        return f"+7 ({phone[1:4]}) {phone[4:7]}-{phone[7:9]}-{phone[9:11]}"
+    return phone
+
+
+def _loginbot_webhook_url(request: Request) -> str:
+    base = WEB_API_PUBLIC_URL or str(request.base_url).rstrip("/")
+    return f"{base}/api/landing/auth/phone/webhook"
+
+
+def _cleanup_phone_sessions() -> None:
+    now = time.time()
+    expired = [
+        rid
+        for rid, session in _phone_auth_sessions.items()
+        if now - float(session.get("created_at", 0)) > PHONE_SESSION_TTL
+    ]
+    for rid in expired:
+        _phone_auth_sessions.pop(rid, None)
+
+
+async def _ensure_landing_phone_user(
+    phone: str,
+    *,
+    site_url: Optional[str],
+    partner: str,
+) -> tuple[Any, Any]:
+    pair = await sql.get_landing_user_by_phone(phone)
+    if pair is not None:
+        user, site = pair
+        await sql.set_landing_email_verified(int(user.id), True)
+        return user, site
+    internal_id = await sql.register_landing_phone_user(
+        phone,
+        site_url=site_url,
+        partner=partner,
+    )
+    pair = await sql.get_landing_user_by_internal_id(internal_id)
+    if pair is None:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "User creation failed")
+    return pair
 
 
 def _hash_password(password: str) -> str:
@@ -331,6 +401,11 @@ class ChangePasswordIn(BaseModel):
 
 class RemovePasswordIn(BaseModel):
     current_password: str = Field(min_length=4)
+
+
+class PhoneStartIn(BaseModel):
+    phone: str = Field(min_length=10, max_length=32)
+    partner: Optional[str] = None
 
 
 @landing_router.post("/auth/check-email")
@@ -454,6 +529,133 @@ async def landing_google(body: GoogleAuthIn, request: Request):
     internal_id = int(user.id)
     token = _issue_landing_jwt(user_id=internal_id, auth="google", username=em)
     return _auth_response(request, token, _landing_user_dict(user, site), success=True)
+
+
+@landing_router.post("/auth/phone/start")
+async def landing_phone_start(body: PhoneStartIn, request: Request):
+    if not LOGINBOT_API_KEY:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Phone login not configured")
+    _rate_limit_or_raise(_client_ip(request), "phone-start", max_req=5, window=300)
+    _cleanup_phone_sessions()
+    phone = _normalize_phone(body.phone)
+    partner_raw = body.partner or request.query_params.get("start")
+    partner = _parse_partner_ref(partner_raw) or ""
+    site_url = _site_url_from_request(request)
+    webhook = _loginbot_webhook_url(request)
+    try:
+        auth_data = await start_call_auth(
+            phone,
+            webhook=webhook,
+            payload=phone,
+            timeout=LOGINBOT_DEFAULT_TIMEOUT,
+        )
+    except LoginBotError as e:
+        logger.warning("LoginBot auth start failed: {}", e)
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            "Не удалось начать авторизацию по телефону. Попробуйте позже.",
+        ) from e
+    request_id = str(auth_data.get("requestId") or "")
+    call_to_phone = str(auth_data.get("callToPhone") or "")
+    if not request_id or not call_to_phone:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Некорректный ответ LoginBot")
+    _phone_auth_sessions[request_id] = {
+        "request_id": request_id,
+        "phone": phone,
+        "status": "pending",
+        "created_at": time.time(),
+        "partner": partner,
+        "site_url": site_url,
+        "client_ip": _client_ip(request),
+        "internal_id": None,
+    }
+    return {
+        "request_id": request_id,
+        "call_to_phone": call_to_phone,
+        "call_to_phone_display": _format_phone_display(call_to_phone),
+        "timeout": int(auth_data.get("timeout") or LOGINBOT_DEFAULT_TIMEOUT),
+        "valid_till": auth_data.get("validTill"),
+    }
+
+
+@landing_router.post("/auth/phone/webhook")
+async def landing_phone_webhook(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid JSON")
+    request_id = str(body.get("requestId") or "")
+    status_value = str(body.get("status") or "")
+    phone = str(body.get("phone") or "")
+    if not request_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Missing requestId")
+    session = _phone_auth_sessions.get(request_id)
+    if session is None:
+        logger.info("LoginBot webhook for unknown requestId={}", request_id)
+        return {"ok": True}
+    session["status"] = status_value
+    if phone:
+        session["phone"] = _normalize_phone(phone)
+    if status_value == "accepted":
+        try:
+            user, _site = await _ensure_landing_phone_user(
+                session["phone"],
+                site_url=session.get("site_url"),
+                partner=session.get("partner") or "",
+            )
+            session["internal_id"] = int(user.id)
+        except Exception as e:
+            logger.exception("Phone webhook user provisioning failed: {}", e)
+            session["status"] = "rejected"
+    return {"ok": True}
+
+
+@landing_router.get("/auth/phone/status/{request_id}")
+async def landing_phone_status(request_id: str, request: Request):
+    _rate_limit_or_raise(_client_ip(request), "phone-status", max_req=40, window=300)
+    _cleanup_phone_sessions()
+    session = _phone_auth_sessions.get(request_id)
+    if session is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Сессия авторизации не найдена")
+    if session.get("client_ip") and session["client_ip"] != _client_ip(request):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Доступ запрещён")
+    status_value = str(session.get("status") or "pending")
+    if status_value == "pending":
+        return {"status": "pending"}
+    if status_value == "accepted":
+        internal_id = session.get("internal_id")
+        if internal_id is None:
+            user, site = await _ensure_landing_phone_user(
+                session["phone"],
+                site_url=session.get("site_url"),
+                partner=session.get("partner") or "",
+            )
+            internal_id = int(user.id)
+            session["internal_id"] = internal_id
+        else:
+            pair = await sql.get_landing_user_by_internal_id(int(internal_id))
+            if pair is None:
+                raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "User not found")
+            user, site = pair
+        phone = session["phone"]
+        token = _issue_landing_jwt(user_id=int(user.id), auth="phone", username=phone)
+        _phone_auth_sessions.pop(request_id, None)
+        return _auth_response(
+            request,
+            token,
+            _landing_user_dict(user, site),
+            success=True,
+            status="accepted",
+        )
+    _phone_auth_sessions.pop(request_id, None)
+    messages = {
+        "rejected": "Время ожидания звонка истекло. Попробуйте снова.",
+        "canceled": "Авторизация отменена. Попробуйте снова.",
+    }
+    return JSONResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content={"status": status_value, "detail": messages.get(status_value, "Авторизация не удалась")},
+    )
 
 
 @landing_router.post("/auth/logout")

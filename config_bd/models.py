@@ -88,6 +88,7 @@ class SecondSite(Base):
     site_url = Column(String(512), nullable=True)
     verified = Column(Boolean, default=False)
     password = Column(Text, nullable=True)
+    phone = Column(String(16), nullable=True, unique=True)
 
 
 class WlTrafficMeta(Base):

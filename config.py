@@ -55,6 +55,9 @@ LANDING_SITE_URL: str = (
     os.environ.get("LANDING_SITE_URL") or "http://localhost:5173"
 ).strip().rstrip("/")
 WEB_API_PORT: int = int(os.environ.get("WEB_API_PORT", "8080"))
+# Публичный URL бэкенда (для webhook LoginBot). Пример: https://api.example.com
+WEB_API_PUBLIC_URL: str = (os.environ.get("WEB_API_PUBLIC_URL") or "").strip().rstrip("/")
+LOGINBOT_API_KEY: Optional[str] = (os.environ.get("LOGINBOT_API_KEY") or "").strip() or None
 
 # Кастомная страница подписки: /api/v1/sub_page/* (заголовок X-Sub-Page-Api-Key или Bearer).
 SUB_PAGE_API_KEY: Optional[str] = (os.environ.get("SUB_PAGE_API_KEY") or "").strip() or None

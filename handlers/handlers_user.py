@@ -2,7 +2,7 @@ import urllib.parse
 from datetime import datetime, timezone
 
 from bot import sql, x3, bot
-from config import CHANEL_ID, CHECKER_ID, PUBLIC_SITE_URL, PARTNER_PROCENT, PARTNER_MIN, SUPPORT_URL, BOT_URL
+from config import ADMIN_IDS, CHANEL_ID, CHECKER_ID, PUBLIC_SITE_URL, PARTNER_PROCENT, PARTNER_MIN, SUPPORT_URL, BOT_URL
 from handlers.handlers_start_prize import schedule_start_prize
 from lead_tracker import post_user_registered, post_user_trial, tracker_source_from_ref_and_stamp
 from keyboard import (keyboard_start, keyboard_tariff_bonus, keyboard_tariff,
@@ -362,11 +362,12 @@ async def buy_vpn_self_cb(callback: CallbackQuery):
         in_panel = user_data[4]
 
     result_active = await x3.activ(str(callback.from_user.id))
+    is_admin = callback.from_user.id in ADMIN_IDS
 
     if result_active['activ'] == '🔎 - Не подключён' and not in_panel:
-        kb = keyboard_tariff_bonus()
+        kb = keyboard_tariff_bonus(is_admin=is_admin)
     else:
-        kb = keyboard_tariff()
+        kb = keyboard_tariff(is_admin=is_admin)
 
     await edit_or_send_photo(
         callback,

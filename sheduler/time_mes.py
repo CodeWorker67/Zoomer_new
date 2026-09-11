@@ -13,7 +13,7 @@ from keyboard import keyboard_tariff, keyboard_tariff_trial, create_kb, STYLE_PR
 from telegram_ids import is_telegram_chat_id
 from lexicon import lexicon
 from logging_config import logger
-from config import CHECKER_ID
+from config import ADMIN_IDS, CHECKER_ID
 
 WINDOW = timedelta(minutes=10)
 STATE_VERSION = 1
@@ -133,10 +133,11 @@ async def send_message_cron(bot: Bot):
             end_key = _end_key(end)
             sent = _load_state(field_str_1_raw, end_key)
 
+            is_admin = user_id in ADMIN_IDS
             if in_panel:
-                keyboard = keyboard_tariff()
+                keyboard = keyboard_tariff(is_admin=is_admin)
             else:
-                keyboard = keyboard_tariff_trial()
+                keyboard = keyboard_tariff_trial(is_admin=is_admin)
 
             if now < end:
                 t7 = end - timedelta(days=7)

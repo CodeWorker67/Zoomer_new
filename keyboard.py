@@ -200,44 +200,69 @@ def keyboard_earn_with_us() -> InlineKeyboardMarkup:
     )
 
 
-def keyboard_tariff_bonus():
+_TARIFF_LABELS = {
+    '7': '7 дней — 99 руб',
+    '30': '30 дней — 299 руб',
+    '90': '90 дней — 749 руб (выгода −17%)',
+    '180': '180 дней — 1349 руб (выгода −25%)',
+    '365': '365 дней — 2399 руб (выгода −33%)',
+    '730': '2 года — 3699 руб (выгода −50%)',
+}
+
+_USER_TARIFF_EMOJI = {
+    '7': '👌 ',
+    '30': '🤝 ',
+    '90': '✅ ',
+    '180': '🏆 ',
+    '365': '💎 ',
+    '730': '🔥 ',
+}
+
+_ADMIN_TARIFF_EMOJI = {
+    '7': '',
+    '30': '1🎟️ ',
+    '90': '3🎟️ ',
+    '180': '6🎟️ ',
+    '365': '12🎟️ ',
+    '730': '24🎟️ ',
+}
+
+
+def tariff_button_label(key: str, *, is_admin: bool = False) -> str:
+    prefix = _ADMIN_TARIFF_EMOJI[key] if is_admin else _USER_TARIFF_EMOJI[key]
+    return f'{prefix}{_TARIFF_LABELS[key]}'
+
+
+def _tariff_button_kwargs(*, is_admin: bool = False) -> dict[str, str]:
+    return {
+        f'r_{key}': tariff_button_label(key, is_admin=is_admin)
+        for key in _TARIFF_LABELS
+    }
+
+
+def keyboard_tariff_bonus(*, is_admin: bool = False):
     return create_kb(
         1,
-        r_7='👌 7 дней — 99 руб',
-        r_30='🤝 30 дней — 299 руб',
-        r_90='✅ 90 дней — 749 руб (выгода −17%)',
-        r_180='🏆 180 дней — 1349 руб (выгода −25%)',
-        r_365='💎 365 дней — 2399 руб (выгода −33%)',
-        r_730='🔥 2 года — 3699 руб (выгода −50%)',
+        **_tariff_button_kwargs(is_admin=is_admin),
         free_vpn='🔥ПОПРОБОВАТЬ 1 день БЕСПЛАТНО🔥',
         wl_traffic_buy_sub='📦 Купить трафик Антиглушилка',
         back_to_buy_menu='🔙 Назад',
     )
 
 
-def keyboard_tariff():
+def keyboard_tariff(*, is_admin: bool = False):
     return create_kb(
         1,
-        r_7='👌 7 дней — 99 руб',
-        r_30='🤝 30 дней — 299 руб',
-        r_90='✅ 90 дней — 749 руб (выгода −17%)',
-        r_180='🏆 180 дней — 1349 руб (выгода −25%)',
-        r_365='💎 365 дней — 2399 руб (выгода −33%)',
-        r_730='🔥 2 года — 3699 руб (выгода −50%)',
+        **_tariff_button_kwargs(is_admin=is_admin),
         wl_traffic_buy_sub='📦 Купить трафик Антиглушилка',
         back_to_buy_menu='🔙 Назад',
     )
 
 
-def keyboard_tariff_trial():
+def keyboard_tariff_trial(*, is_admin: bool = False):
     return create_kb(
         1,
-        r_7='👌 7 дней — 99 руб',
-        r_30='🤝 30 дней — 299 руб',
-        r_90='✅ 90 дней — 749 руб (выгода −17%)',
-        r_180='🏆 180 дней — 1349 руб (выгода −25%)',
-        r_365='💎 365 дней — 2399 руб (выгода −33%)',
-        r_730='🔥 2 года — 3699 руб (выгода −50%)',
+        **_tariff_button_kwargs(is_admin=is_admin),
         wl_traffic_buy_sub='📦 Купить трафик Антиглушилка',
         back_to_buy_menu='🔙 Назад',
     )

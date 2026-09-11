@@ -5,7 +5,7 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery
 
 from bot import bot, sql, x3
-from config import CHECKER_ID
+from config import ADMIN_IDS, CHECKER_ID
 from keyboard import (
     keyboard_start_prize_claim,
     keyboard_start_prize_hurry,
@@ -53,9 +53,10 @@ async def _buy_self_keyboard(uid: int):
     user_data = await sql.get_user(uid)
     in_panel = bool(user_data and len(user_data) > _USER_TUPLE_IN_PANEL and user_data[_USER_TUPLE_IN_PANEL])
     result_active = await x3.activ(str(uid))
+    is_admin = uid in ADMIN_IDS
     if result_active.get("activ") == "🔎 - Не подключён" and not in_panel:
-        return keyboard_tariff_bonus()
-    return keyboard_tariff()
+        return keyboard_tariff_bonus(is_admin=is_admin)
+    return keyboard_tariff(is_admin=is_admin)
 
 
 async def _show_buy_self(callback: CallbackQuery) -> None:

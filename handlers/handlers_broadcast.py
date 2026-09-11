@@ -273,7 +273,7 @@ def _resolve_reply_markup(
     if keyboard_mode == "none":
         return None
     if keyboard_mode == "tariff":
-        return keyboard_tariff()
+        return keyboard_tariff(is_admin=target_user_id in ADMIN_IDS)
     if keyboard_mode == "start":
         return keyboard_start()
     if keyboard_mode == "custom":

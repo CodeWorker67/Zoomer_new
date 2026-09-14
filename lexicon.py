@@ -68,7 +68,7 @@ lexicon = {
         'V2Ray VLESS Reality). Максимальная скорость 10 Гбит/с.\n\n'
         'При возникновении вопросов пишите в '
         '<a href="https://t.me/Helpzoomerbot">Поддержку</a> или на почту Zoomerskysupp@proton.me\n\n'
-        'При использование наших услуг вы автоматически соглашаетесь на наши:\n\n'
+        'При использовании наших услуг вы автоматически соглашаетесь на наши:\n\n'
         ' - <a href="https://telegra.ph/Polzovatelskoe-soglashenie-08-11-20">Пользовательское соглашение.</a>\n'
         ' - <a href="https://telegra.ph/Politika-konfidencialnosti-08-11-52">Политика конфиденциальности.</a>'
     ),

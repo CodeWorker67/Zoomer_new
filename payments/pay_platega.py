@@ -1,5 +1,9 @@
 import aiohttp
-from typing import Dict, Optional
+from typing import Dict, Literal, Optional
+
+UiKind = Literal["sbp", "card"]
+
+PLATEGA_HTTP_TIMEOUT = aiohttp.ClientTimeout(total=30)
 
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
@@ -69,7 +73,7 @@ class PlategaPayment:
             data["payload"] = payload
 
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(timeout=PLATEGA_HTTP_TIMEOUT) as session:
                 async with session.post(url, json=data, headers=self.headers) as response:
                     response_text = await response.text()
 
@@ -122,6 +126,69 @@ def _platega_method_name(payment_method: int) -> str:
     if payment_method == PLATEGA_CARD_METHOD:
         return "card"
     return "crypto"
+
+
+def _fk_ui_kind(payment_method: int) -> Optional[UiKind]:
+    if payment_method == PLATEGA_SBP_METHOD:
+        return "sbp"
+    if payment_method == PLATEGA_CARD_METHOD:
+        return "card"
+    return None
+
+
+async def _fallback_freekassa_bot(
+    *,
+    val: str,
+    des: str,
+    user_id: str,
+    duration: str,
+    white: bool,
+    payment_method: int,
+    is_gift: bool,
+    payload_suffix: str = "",
+) -> Optional[Dict]:
+    kind = _fk_ui_kind(payment_method)
+    if not kind:
+        return None
+    from payments import pay_freekassa as fk_module
+
+    logger.warning(f"Platega bot: fallback на FreeKassa ({kind})")
+    if is_gift:
+        return await fk_module.pay_for_gift(val, des, user_id, duration, white, kind)
+    return await fk_module.pay(val, des, user_id, duration, white, kind, payload_suffix=payload_suffix)
+
+
+async def _fallback_freekassa_site(
+    *,
+    val: str,
+    des: str,
+    payload_user: str,
+    billing_user_id: int,
+    duration: str,
+    white: bool,
+    is_gift: bool,
+    payment_method: int,
+    telegram_username: Optional[str],
+    payload_source: str,
+) -> Optional[Dict]:
+    kind = _fk_ui_kind(payment_method)
+    if not kind:
+        return None
+    from payments import pay_freekassa as fk_module
+
+    logger.warning(f"Platega site: fallback на FreeKassa ({kind})")
+    return await fk_module.pay_site(
+        val,
+        des,
+        payload_user,
+        billing_user_id,
+        duration,
+        white,
+        is_gift,
+        kind,
+        telegram_username,
+        payload_source,
+    )
 
 
 def _build_payload(
@@ -179,6 +246,8 @@ async def pay(
             payment_method=payment_method,
             payload=payload,
         )
+        if not (result.get("url") and result.get("id")):
+            raise ValueError("Platega: пустой redirect или transactionId")
 
         if payment_method == PLATEGA_SBP_METHOD:
             await sql.add_platega_payment(
@@ -199,6 +268,18 @@ async def pay(
         return result
     except Exception as e:
         logger.error(f"❌ Error creating Platega payment: {e}")
+        fk = await _fallback_freekassa_bot(
+            val=val,
+            des=des,
+            user_id=user_id,
+            duration=duration,
+            white=white,
+            payment_method=payment_method,
+            is_gift=False,
+            payload_suffix=payload_suffix,
+        )
+        if fk and fk.get("status") == "pending":
+            return fk
         return {"status": "error", "url": "", "id": ""}
 
 
@@ -235,6 +316,8 @@ async def pay_for_gift(
             payment_method=payment_method,
             payload=payload,
         )
+        if not (result.get("url") and result.get("id")):
+            raise ValueError("Platega: пустой redirect или transactionId")
 
         if payment_method == PLATEGA_SBP_METHOD:
             await sql.add_platega_payment(
@@ -253,6 +336,17 @@ async def pay_for_gift(
         return result
     except Exception as e:
         logger.error(f"❌ Error creating Platega payment: {e}")
+        fk = await _fallback_freekassa_bot(
+            val=val,
+            des=des,
+            user_id=user_id,
+            duration=duration,
+            white=white,
+            payment_method=payment_method,
+            is_gift=True,
+        )
+        if fk and fk.get("status") == "pending":
+            return fk
         return {"status": "error", "url": "", "id": ""}
 
 
@@ -297,6 +391,8 @@ async def _pay_site(
             return_url=return_url or BOT_URL,
             failed_url=failed_url or BOT_URL,
         )
+        if not (result.get("url") and result.get("id")):
+            raise ValueError("Platega: пустой redirect или transactionId")
         if payment_method == PLATEGA_SBP_METHOD:
             await sql.add_platega_payment(
                 billing_user_id,
@@ -319,6 +415,20 @@ async def _pay_site(
         return {"status": "pending", "url": result.get("url") or "", "id": result.get("id") or ""}
     except Exception as e:
         logger.error(f"❌ Platega site {method} create_payment: {e}")
+        fk = await _fallback_freekassa_site(
+            val=str(val),
+            des=des,
+            payload_user=payload_user,
+            billing_user_id=billing_user_id,
+            duration=duration,
+            white=white,
+            is_gift=is_gift,
+            payment_method=payment_method,
+            telegram_username=telegram_username,
+            payload_source=payload_source,
+        )
+        if fk and fk.get("status") == "pending":
+            return fk
         return {"status": "error", "url": "", "id": ""}
 
 

@@ -1197,6 +1197,232 @@ async def check_fk_command(message: Message):
                 pass
 
 
+_SITE_REPORT_DAYS = 30
+
+
+def _site_report_excel_dt(dt: Optional[datetime]) -> Optional[str]:
+    if dt is None:
+        return None
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _build_check_site_workbook(
+    *,
+    period_from: datetime,
+    period_to: datetime,
+    site_users: list,
+    site_payments: list,
+) -> openpyxl.Workbook:
+    header_alignment = Alignment(horizontal="center", vertical="center")
+    thin_border = Border(
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side(style="thin"),
+    )
+    columns = [
+        "event_type",
+        "event_datetime",
+        "user_id",
+        "site_type",
+        "email",
+        "phone",
+        "google_sub",
+        "site_url",
+        "verified",
+        "registered_at",
+        "stamp",
+        "partner",
+        "subscription_end",
+        "payment_table",
+        "payment_id",
+        "payment_amount",
+        "payment_status",
+        "payment_is_gift",
+        "payment_payload",
+    ]
+
+    user_by_id = {int(u["user_id"]): u for u in site_users}
+    table_rows: list[list] = []
+
+    for u in site_users:
+        reg_at = u.get("registered_at")
+        table_rows.append(
+            [
+                "registration",
+                _site_report_excel_dt(reg_at),
+                u.get("user_id"),
+                u.get("site_type"),
+                u.get("email"),
+                u.get("phone"),
+                u.get("google_sub"),
+                u.get("site_url"),
+                u.get("verified"),
+                _site_report_excel_dt(reg_at),
+                u.get("stamp"),
+                u.get("partner"),
+                _site_report_excel_dt(u.get("subscription_end_date")),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            ]
+        )
+
+    for p in site_payments:
+        uid = int(p["user_id"])
+        prof = user_by_id.get(uid, {})
+        tc = p.get("time_created")
+        table_rows.append(
+            [
+                "payment",
+                _site_report_excel_dt(tc),
+                uid,
+                prof.get("site_type"),
+                prof.get("email"),
+                prof.get("phone"),
+                prof.get("google_sub"),
+                prof.get("site_url"),
+                prof.get("verified"),
+                _site_report_excel_dt(prof.get("registered_at")),
+                prof.get("stamp"),
+                prof.get("partner"),
+                _site_report_excel_dt(prof.get("subscription_end_date")),
+                p.get("payment_table"),
+                p.get("payment_id"),
+                p.get("amount"),
+                p.get("status"),
+                p.get("is_gift"),
+                p.get("payload"),
+            ]
+        )
+
+    table_rows.sort(
+        key=lambda r: (
+            0 if r[0] == "registration" else 1,
+            r[1] or "",
+            r[2] or 0,
+        )
+    )
+
+    wb = openpyxl.Workbook()
+    ws_info = wb.active
+    ws_info.title = "summary"
+    ws_info["A1"] = "Период с"
+    ws_info["B1"] = _site_report_excel_dt(period_from)
+    ws_info["A2"] = "Период по"
+    ws_info["B2"] = _site_report_excel_dt(period_to)
+    ws_info["A3"] = "Регистраций на сайте за период"
+    ws_info["B3"] = sum(
+        1
+        for u in site_users
+        if u.get("registered_at") and u["registered_at"] >= period_from
+    )
+    ws_info["A4"] = "Оплат source:site за период (шт.)"
+    ws_info["B4"] = len(site_payments)
+    ws_info["A5"] = "Оплат source:site за период (сумма ₽)"
+    ws_info["B5"] = sum(
+        int(p["amount"])
+        for p in site_payments
+        if p.get("amount") not in (None, 1)
+    )
+    ws_info["A6"] = "Всего пользователей сайта в таблице"
+    ws_info["B6"] = len(site_users)
+
+    ws = wb.create_sheet(title="site_report")
+    for col_num, title in enumerate(columns, 1):
+        cell = ws.cell(row=1, column=col_num, value=title)
+        cell.alignment = header_alignment
+        cell.border = thin_border
+
+    for row_num, row_data in enumerate(table_rows, 2):
+        for col_num, value in enumerate(row_data, 1):
+            cell = ws.cell(row=row_num, column=col_num, value=value)
+            cell.border = thin_border
+
+    for col in ws.columns:
+        max_len = 0
+        col_letter = col[0].column_letter
+        for cell in col:
+            if cell.value is not None:
+                max_len = max(max_len, len(str(cell.value)))
+        ws.column_dimensions[col_letter].width = min(max_len + 2, _EXCEL_COL_WIDTH_MAX)
+
+    return wb
+
+
+@router.message(Command(commands=["check_site"]))
+async def check_site_command(message: Message):
+    """Статистика сайта за 30 дней и Excel: все регистрации на сайте + оплаты source:site за период."""
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    await message.answer("🔄 Собираю данные по сайту за последние 30 дней...")
+
+    export_path = None
+    try:
+        period_to = datetime.now()
+        period_from = period_to - timedelta(days=_SITE_REPORT_DAYS)
+
+        site_users, site_payments, reg_count = await asyncio.gather(
+            sql.list_all_site_users(),
+            sql.list_site_source_payments_since(period_from),
+            sql.count_site_registrations_since(period_from),
+        )
+
+        pay_count = len(site_payments)
+        pay_sum = sum(
+            int(p["amount"])
+            for p in site_payments
+            if p.get("amount") not in (None, 1)
+        )
+
+        wb = _build_check_site_workbook(
+            period_from=period_from,
+            period_to=period_to,
+            site_users=site_users,
+            site_payments=site_payments,
+        )
+        export_path = tempfile.mktemp(suffix=".xlsx")
+        wb.save(export_path)
+
+        period_label = (
+            f"{period_from.strftime('%d.%m.%Y %H:%M')} — "
+            f"{period_to.strftime('%d.%m.%Y %H:%M')}"
+        )
+        caption = (
+            f"📊 Отчёт по сайту\n"
+            f"📅 Период: {period_label}\n\n"
+            f"Регистраций на сайте: {reg_count}\n"
+            f"Оплат source:site: {pay_count} на {pay_sum:,} ₽".replace(",", " ")
+            + f"\n\nВ Excel: все {len(site_users)} аккаунтов сайта "
+            f"+ {pay_count} оплат за период (лист site_report)."
+        )
+        fname = f"check_site_{period_to.strftime('%Y%m%d_%H%M')}.xlsx"
+        await message.answer_document(
+            document=FSInputFile(export_path, filename=fname),
+            caption=caption,
+        )
+        logger.info(
+            "Админ %s выполнил /check_site: reg=%s pays=%s sum=%s",
+            message.from_user.id,
+            reg_count,
+            pay_count,
+            pay_sum,
+        )
+    except Exception as e:
+        logger.exception("Ошибка в /check_site")
+        await message.answer(f"❌ Ошибка: {str(e)}")
+    finally:
+        if export_path:
+            try:
+                os.remove(export_path)
+            except OSError:
+                pass
+
+
 @router.message(Command(commands=['new']))
 async def new_panel_users_command(message: Message):
     """2 сквада обычной подписки → 3 чанка → POST bulk/update-squads по порядку; сквад на каждый HTTP — random из двух."""

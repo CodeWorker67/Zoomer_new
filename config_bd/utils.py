@@ -35,6 +35,17 @@ _STAT_IN_CHUNK = 8000
 
 _BILLING_OK_STATUSES = ("confirmed", "paid")
 
+_SITE_SOURCE_PAYLOAD = "%source:site%"
+
+_SITE_PAYMENT_MODELS: Tuple[Tuple[str, Any], ...] = (
+    ("payments", Payments),
+    ("payments_cards", PaymentsCards),
+    ("payments_platega_crypto", PaymentsPlategaCrypto),
+    ("payments_wata_sbp", PaymentsWataSBP),
+    ("payments_wata_card", PaymentsWataCard),
+    ("payments_fk_sbp", PaymentsFkSBP),
+)
+
 # Старые тарифы до полноценного payload (сумма → дни, только обычная подписка).
 _LEGACY_BILLING_AMOUNT_TO_DAYS: Dict[int, int] = {
     99: 30,
@@ -3573,4 +3584,114 @@ class AsyncSQL:
 
         rows_acc.sort(key=lambda x: (x[0], x[1]))
         return rows_acc
+
+    async def list_all_site_users(self) -> List[Dict[str, Any]]:
+        """Все пользователи с first_site или second_site (регистрация на сайте)."""
+        out: List[Dict[str, Any]] = []
+
+        async with self.session_factory() as session:
+            fs_stmt = select(Users, FirstSite).join(
+                FirstSite, FirstSite.tg_id == Users.user_id
+            )
+            for user, site in (await session.execute(fs_stmt)).all():
+                out.append(
+                    {
+                        "user_id": int(user.user_id),
+                        "internal_id": int(user.id),
+                        "site_type": "first_site",
+                        "email": site.email,
+                        "phone": None,
+                        "google_sub": None,
+                        "site_url": None,
+                        "verified": bool(site.field_bool_1),
+                        "registered_at": user.create_user,
+                        "stamp": user.stamp,
+                        "partner": user.partner,
+                        "subscription_end_date": user.subscription_end_date,
+                    }
+                )
+
+            ss_stmt = select(Users, SecondSite).join(
+                SecondSite, SecondSite.tg_id == Users.user_id
+            )
+            for user, site in (await session.execute(ss_stmt)).all():
+                out.append(
+                    {
+                        "user_id": int(user.user_id),
+                        "internal_id": int(user.id),
+                        "site_type": "second_site",
+                        "email": site.email,
+                        "phone": site.phone,
+                        "google_sub": site.google_sub,
+                        "site_url": site.site_url,
+                        "verified": bool(site.verified),
+                        "registered_at": user.create_user,
+                        "stamp": user.stamp,
+                        "partner": user.partner,
+                        "subscription_end_date": user.subscription_end_date,
+                    }
+                )
+
+        out.sort(key=lambda r: (r["registered_at"] or datetime.min, r["user_id"]))
+        return out
+
+    async def list_site_source_payments_since(
+        self,
+        since: datetime,
+        *,
+        ok_status_only: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """Платежи с payload source:site с time_created >= since."""
+        rows: List[Dict[str, Any]] = []
+
+        async with self.session_factory() as session:
+            for table_name, model in _SITE_PAYMENT_MODELS:
+                stmt = select(
+                    model.id,
+                    model.user_id,
+                    model.amount,
+                    model.time_created,
+                    model.status,
+                    model.payload,
+                    model.is_gift,
+                ).where(
+                    model.time_created >= since,
+                    model.payload.like(_SITE_SOURCE_PAYLOAD),
+                )
+                if ok_status_only:
+                    stmt = stmt.where(model.status.in_(_BILLING_OK_STATUSES))
+                for pid, uid, amount, tc, status, payload, is_gift in (
+                    await session.execute(stmt)
+                ).all():
+                    rows.append(
+                        {
+                            "payment_table": table_name,
+                            "payment_id": int(pid),
+                            "user_id": int(uid),
+                            "amount": int(amount),
+                            "time_created": tc,
+                            "status": status,
+                            "payload": payload,
+                            "is_gift": bool(is_gift),
+                        }
+                    )
+
+        rows.sort(key=lambda r: (r["time_created"] or datetime.min, r["payment_id"]))
+        return rows
+
+    async def count_site_registrations_since(self, since: datetime) -> int:
+        async with self.session_factory() as session:
+            fs_cnt = await session.scalar(
+                select(func.count())
+                .select_from(Users)
+                .join(FirstSite, FirstSite.tg_id == Users.user_id)
+                .where(Users.create_user >= since)
+            )
+            ss_cnt = await session.scalar(
+                select(func.count())
+                .select_from(Users)
+                .join(SecondSite, SecondSite.tg_id == Users.user_id)
+                .where(Users.create_user >= since)
+            )
+        return int(fs_cnt or 0) + int(ss_cnt or 0)
 

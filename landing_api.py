@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 import secrets
 import time
+import json
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, Literal, Optional
 from urllib.parse import urlparse
@@ -11,8 +12,8 @@ from urllib.parse import urlparse
 import aiohttp
 import bcrypt
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, EmailStr, Field
 
@@ -33,6 +34,9 @@ from config import (
     PLATEGA_MERCHANT_ID,
     SUPPORT_URL,
     WEB_API_PUBLIC_URL,
+    WHATSAPP_AUTH_CODE_TTL_SEC,
+    WHATSAPP_VERIFY_TOKEN,
+    WHATSAPP_WA_ME_NUMBER,
 )
 from config_bd.utils import _norm_email
 from lexicon import dct_desc, dct_price, lexicon
@@ -41,6 +45,13 @@ from payments.payload_source import SITE
 from payments.pay_platega import pay_site_card, pay_site_sbp
 from services.loginbot import LOGINBOT_DEFAULT_TIMEOUT, LoginBotError, start_call_auth
 from services.unisender import send_email as send_unisender_email
+from services.whatsapp_cloud import (
+    WhatsAppCloudError,
+    parse_incoming_text_messages,
+    send_text_message,
+    verify_webhook_signature,
+    whatsapp_configured,
+)
 
 landing_router = APIRouter(prefix="/api/landing", tags=["landing"])
 
@@ -59,8 +70,11 @@ TARIFF_PUBLIC = [
 
 _rate_limits: dict[str, list[float]] = {}
 _phone_auth_sessions: dict[str, dict[str, Any]] = {}
+_whatsapp_auth_codes: dict[str, dict[str, Any]] = {}
+_whatsapp_wa_id_active_code: dict[str, str] = {}
 bearer_scheme = HTTPBearer(auto_error=False)
 PHONE_SESSION_TTL = LOGINBOT_DEFAULT_TIMEOUT + 120
+WHATSAPP_CODE_TTL = WHATSAPP_AUTH_CODE_TTL_SEC
 
 
 def _rate_check(key: str, max_requests: int, window_sec: int) -> bool:
@@ -190,7 +204,7 @@ async def get_landing_jwt_context(
     else:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")
     auth = payload.get("auth") or "email"
-    if auth not in ("email", "google", "phone"):
+    if auth not in ("email", "google", "phone", "whatsapp"):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")
     return {"user_id": uid, "username": payload.get("username"), "auth": auth}
 
@@ -225,6 +239,8 @@ async def _send_landing_otp(email: str) -> None:
 def _landing_auth_type(site) -> str:
     if site.google_sub:
         return "google"
+    if getattr(site, "whatsapp_id", None):
+        return "whatsapp"
     if getattr(site, "phone", None):
         return "phone"
     return "email"
@@ -235,6 +251,7 @@ def _landing_user_dict(user, site) -> dict[str, Any]:
         "id": int(user.id),
         "email": site.email,
         "phone": getattr(site, "phone", None),
+        "whatsapp_id": getattr(site, "whatsapp_id", None),
         "auth": _landing_auth_type(site),
         "billing_user_id": int(user.user_id),
         "has_password": bool(site.password),
@@ -272,6 +289,122 @@ def _cleanup_phone_sessions() -> None:
     ]
     for rid in expired:
         _phone_auth_sessions.pop(rid, None)
+
+
+def _whatsapp_bot_url() -> Optional[str]:
+    if not WHATSAPP_WA_ME_NUMBER:
+        return None
+    digits = re.sub(r"\D", "", WHATSAPP_WA_ME_NUMBER)
+    if not digits:
+        return None
+    return f"https://wa.me/{digits}?text=START"
+
+
+def _cleanup_whatsapp_codes() -> None:
+    now = time.time()
+    expired_codes = [
+        code
+        for code, data in _whatsapp_auth_codes.items()
+        if now > float(data.get("expires_at", 0))
+    ]
+    for code in expired_codes:
+        data = _whatsapp_auth_codes.pop(code, None)
+        if data:
+            wa_id = str(data.get("wa_id") or "")
+            if _whatsapp_wa_id_active_code.get(wa_id) == code:
+                _whatsapp_wa_id_active_code.pop(wa_id, None)
+
+
+def _whatsapp_phone_from_wa_id(wa_id: str) -> Optional[str]:
+    digits = re.sub(r"\D", "", wa_id or "")
+    if len(digits) == 11 and digits.startswith("8"):
+        digits = "7" + digits[1:]
+    if len(digits) == 10:
+        digits = "7" + digits
+    if len(digits) == 11 and digits.startswith("7"):
+        return digits
+    return None
+
+
+async def _issue_whatsapp_login_code(
+    *,
+    wa_id: str,
+    profile_name: str,
+    partner: str = "",
+    site_url: Optional[str] = None,
+) -> str:
+    _cleanup_whatsapp_codes()
+    old_code = _whatsapp_wa_id_active_code.get(wa_id)
+    if old_code:
+        _whatsapp_auth_codes.pop(old_code, None)
+    code = _random_otp_code()
+    while code in _whatsapp_auth_codes:
+        code = _random_otp_code()
+    expires_at = time.time() + WHATSAPP_CODE_TTL
+    _whatsapp_auth_codes[code] = {
+        "wa_id": wa_id,
+        "profile_name": profile_name,
+        "partner": partner,
+        "site_url": site_url,
+        "expires_at": expires_at,
+    }
+    _whatsapp_wa_id_active_code[wa_id] = code
+    return code
+
+
+async def _ensure_landing_whatsapp_user(
+    wa_id: str,
+    *,
+    profile_name: str,
+    site_url: Optional[str],
+    partner: str,
+) -> tuple[Any, Any]:
+    pair = await sql.get_landing_user_by_whatsapp_id(wa_id)
+    if pair is not None:
+        user, site = pair
+        await sql.set_landing_email_verified(int(user.id), True)
+        return user, site
+    phone = _whatsapp_phone_from_wa_id(wa_id)
+    stamp = profile_name[:100] if profile_name else "whatsapp"
+    internal_id = await sql.register_landing_whatsapp_user(
+        wa_id,
+        stamp=stamp,
+        site_url=site_url,
+        partner=partner,
+        phone=phone,
+    )
+    pair = await sql.get_landing_user_by_internal_id(internal_id)
+    if pair is None:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "User creation failed")
+    return pair
+
+
+async def _handle_whatsapp_incoming_message(
+    *,
+    wa_id: str,
+    profile_name: str,
+    text: str,
+) -> None:
+    normalized = (text or "").strip().lower()
+    triggers = ("start", "/start", "старт", "привет", "hello", "hi")
+    if normalized and normalized not in triggers and not normalized.startswith("start"):
+        await send_text_message(
+            wa_id,
+            "Для входа на сайт отправьте START или нажмите «Отправить» в чате после перехода по ссылке с сайта.",
+        )
+        return
+    code = await _issue_whatsapp_login_code(
+        wa_id=wa_id,
+        profile_name=profile_name,
+        partner="",
+        site_url=None,
+    )
+    minutes = max(1, WHATSAPP_CODE_TTL // 60)
+    reply = (
+        f"Ваш код для входа на сайт Зумерский VPN: {code}\n\n"
+        f"Введите его на странице входа. Код действует {minutes} мин."
+    )
+    await send_text_message(wa_id, reply)
 
 
 async def _ensure_landing_phone_user(
@@ -405,6 +538,11 @@ class RemovePasswordIn(BaseModel):
 
 class PhoneStartIn(BaseModel):
     phone: str = Field(min_length=10, max_length=32)
+    partner: Optional[str] = None
+
+
+class WhatsAppVerifyIn(BaseModel):
+    code: str = Field(min_length=6, max_length=6)
     partner: Optional[str] = None
 
 
@@ -656,6 +794,90 @@ async def landing_phone_status(request_id: str, request: Request):
         status_code=status.HTTP_400_BAD_REQUEST,
         content={"status": status_value, "detail": messages.get(status_value, "Авторизация не удалась")},
     )
+
+
+@landing_router.get("/auth/whatsapp/config")
+async def landing_whatsapp_config():
+    if not whatsapp_configured():
+        return {"enabled": False, "bot_url": None, "code_ttl_seconds": WHATSAPP_CODE_TTL}
+    return {
+        "enabled": True,
+        "bot_url": _whatsapp_bot_url(),
+        "code_ttl_seconds": WHATSAPP_CODE_TTL,
+    }
+
+
+@landing_router.post("/auth/whatsapp/verify-code")
+async def landing_whatsapp_verify_code(body: WhatsAppVerifyIn, request: Request):
+    if not whatsapp_configured():
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "WhatsApp login not configured")
+    _rate_limit_or_raise(_client_ip(request), "whatsapp-verify", max_req=15, window=300)
+    if not body.code.isdigit() or len(body.code) != 6:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Неверный код")
+    _cleanup_whatsapp_codes()
+    session = _whatsapp_auth_codes.get(body.code)
+    if session is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Неверный или истёкший код")
+    if time.time() > float(session.get("expires_at", 0)):
+        _whatsapp_auth_codes.pop(body.code, None)
+        wa_id = str(session.get("wa_id") or "")
+        if _whatsapp_wa_id_active_code.get(wa_id) == body.code:
+            _whatsapp_wa_id_active_code.pop(wa_id, None)
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Код истёк, запросите новый в WhatsApp")
+    wa_id = str(session.get("wa_id") or "")
+    partner_raw = body.partner or request.query_params.get("start")
+    partner = _parse_partner_ref(partner_raw) or session.get("partner") or ""
+    site_url = session.get("site_url") or _site_url_from_request(request)
+    user, site = await _ensure_landing_whatsapp_user(
+        wa_id,
+        profile_name=str(session.get("profile_name") or ""),
+        site_url=site_url,
+        partner=str(partner),
+    )
+    _whatsapp_auth_codes.pop(body.code, None)
+    _whatsapp_wa_id_active_code.pop(wa_id, None)
+    username = getattr(site, "whatsapp_id", None) or wa_id
+    token = _issue_landing_jwt(user_id=int(user.id), auth="whatsapp", username=str(username))
+    return _auth_response(request, token, _landing_user_dict(user, site), success=True)
+
+
+@landing_router.get("/auth/whatsapp/webhook")
+async def landing_whatsapp_webhook_verify(
+    hub_mode: str = Query(alias="hub.mode", default=""),
+    hub_verify_token: str = Query(alias="hub.verify_token", default=""),
+    hub_challenge: str = Query(alias="hub.challenge", default=""),
+):
+    if hub_mode != "subscribe":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Invalid mode")
+    if not WHATSAPP_VERIFY_TOKEN or hub_verify_token != WHATSAPP_VERIFY_TOKEN:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Invalid verify token")
+    return PlainTextResponse(content=hub_challenge)
+
+
+@landing_router.post("/auth/whatsapp/webhook")
+async def landing_whatsapp_webhook(request: Request):
+    raw = await request.body()
+    signature = request.headers.get("x-hub-signature-256")
+    if not verify_webhook_signature(raw, signature):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Invalid signature")
+    try:
+        body = json.loads(raw.decode("utf-8"))
+    except Exception:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid JSON")
+    messages = parse_incoming_text_messages(body)
+    for msg in messages:
+        wa_id = msg["wa_id"]
+        try:
+            await _handle_whatsapp_incoming_message(
+                wa_id=wa_id,
+                profile_name=msg.get("profile_name") or "",
+                text=msg.get("text") or "",
+            )
+        except WhatsAppCloudError as e:
+            logger.warning("WhatsApp reply failed wa_id={}: {}", wa_id, e)
+        except Exception:
+            logger.exception("WhatsApp incoming handler failed wa_id={}", wa_id)
+    return {"ok": True}
 
 
 @landing_router.post("/auth/logout")

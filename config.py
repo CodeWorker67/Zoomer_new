@@ -59,6 +59,24 @@ WEB_API_PORT: int = int(os.environ.get("WEB_API_PORT", "8080"))
 WEB_API_PUBLIC_URL: str = (os.environ.get("WEB_API_PUBLIC_URL") or "").strip().rstrip("/")
 LOGINBOT_API_KEY: Optional[str] = (os.environ.get("LOGINBOT_API_KEY") or "").strip() or None
 
+# WhatsApp Cloud API (Meta) — вход на landing через код в WA-боте
+WHATSAPP_ACCESS_TOKEN: Optional[str] = (
+    os.environ.get("WHATSAPP_ACCESS_TOKEN") or ""
+).strip() or None
+WHATSAPP_PHONE_NUMBER_ID: Optional[str] = (
+    os.environ.get("WHATSAPP_PHONE_NUMBER_ID") or ""
+).strip() or None
+WHATSAPP_VERIFY_TOKEN: Optional[str] = (
+    os.environ.get("WHATSAPP_VERIFY_TOKEN") or ""
+).strip() or None
+WHATSAPP_APP_SECRET: Optional[str] = (os.environ.get("WHATSAPP_APP_SECRET") or "").strip() or None
+WHATSAPP_API_VERSION: str = (os.environ.get("WHATSAPP_API_VERSION") or "v21.0").strip()
+# Цифры без + для ссылки wa.me, например 79991234567
+WHATSAPP_WA_ME_NUMBER: Optional[str] = (
+    os.environ.get("WHATSAPP_WA_ME_NUMBER") or ""
+).strip() or None
+WHATSAPP_AUTH_CODE_TTL_SEC: int = int(os.environ.get("WHATSAPP_AUTH_CODE_TTL_SEC", "180"))
+
 # Кастомная страница подписки: /api/v1/sub_page/* (заголовок X-Sub-Page-Api-Key или Bearer).
 SUB_PAGE_API_KEY: Optional[str] = (os.environ.get("SUB_PAGE_API_KEY") or "").strip() or None
 

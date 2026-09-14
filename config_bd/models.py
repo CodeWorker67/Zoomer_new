@@ -89,6 +89,7 @@ class SecondSite(Base):
     verified = Column(Boolean, default=False)
     password = Column(Text, nullable=True)
     phone = Column(String(16), nullable=True, unique=True)
+    whatsapp_id = Column(String(32), nullable=True, unique=True)
 
 
 class WlTrafficMeta(Base):

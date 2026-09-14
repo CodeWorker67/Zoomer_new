@@ -536,6 +536,19 @@ class AsyncSQL:
                 return None
             return user, site
 
+    async def get_landing_user_by_whatsapp_id(self, whatsapp_id: str) -> Optional[Tuple[Users, SecondSite]]:
+        wa = str(whatsapp_id).strip()
+        async with self.session_factory() as session:
+            stmt = select(SecondSite).where(SecondSite.whatsapp_id == wa)
+            site = (await session.execute(stmt)).scalar_one_or_none()
+            if site is None:
+                return None
+            stmt = select(Users).where(Users.user_id == site.tg_id)
+            user = (await session.execute(stmt)).scalar_one_or_none()
+            if user is None:
+                return None
+            return user, site
+
     async def get_landing_user_by_internal_id(self, internal_id: int) -> Optional[Tuple[Users, SecondSite]]:
         async with self.session_factory() as session:
             user = await session.get(Users, internal_id)
@@ -615,6 +628,50 @@ class AsyncSQL:
                 SecondSite(
                     tg_id=uid,
                     phone=normalized,
+                    site_url=site_url,
+                    verified=True,
+                )
+            )
+            await session.commit()
+            await session.refresh(u)
+            return int(u.id)
+
+    async def register_landing_whatsapp_user(
+        self,
+        whatsapp_id: str,
+        stamp: str = "",
+        site_url: Optional[str] = None,
+        partner: str = "",
+        phone: Optional[str] = None,
+    ) -> int:
+        wa = str(whatsapp_id).strip()
+        uid = await self.next_landing_user_id()
+        partner_val = partner or None
+        if partner_val and str(partner_val) == str(uid):
+            partner_val = None
+        phone_val = str(phone).strip() if phone else None
+        async with self.session_factory() as session:
+            if phone_val:
+                existing_phone = (
+                    await session.execute(
+                        select(SecondSite.id).where(SecondSite.phone == phone_val)
+                    )
+                ).scalar_one_or_none()
+                if existing_phone is not None:
+                    phone_val = None
+            u = Users(
+                user_id=uid,
+                stamp=stamp or "whatsapp",
+                partner=partner_val,
+                create_user=_naive_utc(datetime.now(timezone.utc)),
+            )
+            session.add(u)
+            await session.flush()
+            session.add(
+                SecondSite(
+                    tg_id=uid,
+                    whatsapp_id=wa,
+                    phone=phone_val,
                     site_url=site_url,
                     verified=True,
                 )

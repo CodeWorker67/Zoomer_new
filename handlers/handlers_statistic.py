@@ -2,8 +2,8 @@ import asyncio
 import calendar
 import os
 import tempfile
-from datetime import datetime
-from typing import Optional
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional, Tuple
 
 import openpyxl
 from aiogram import Router
@@ -19,6 +19,7 @@ from config import ADMIN_IDS, CHECKER_ID, CHECKER_IDS
 from logging_config import logger
 from config_bd.models import AsyncSessionLocal, Users, Payments, PaymentsStars, PaymentsCryptobot, PaymentsCards, \
     PaymentsPlategaCrypto, PaymentsWataSBP, PaymentsWataCard, PaymentsFkSBP
+from config_bd.utils import _billing_duration_from_amount_fallback, _payload_duration_to_panel_days
 
 router = Router()
 
@@ -93,6 +94,340 @@ class PaymentRecord:
         self.amount = amount
         self.is_gift = is_gift
         self.time_created = time_created
+
+
+class _BestMonthPayment:
+    __slots__ = ("user_id", "amount_rub", "time_created", "is_gift", "payload")
+
+    def __init__(
+        self,
+        user_id: int,
+        amount_rub: int,
+        time_created: datetime,
+        is_gift: bool,
+        payload: Optional[str],
+    ):
+        self.user_id = user_id
+        self.amount_rub = amount_rub
+        self.time_created = time_created
+        self.is_gift = is_gift
+        self.payload = payload
+
+
+_TERM_BUCKET_LABELS = (
+    ("week", "Неделя (7 дн.)"),
+    ("month", "Месяц (30 дн.)"),
+    ("3m", "3 месяца"),
+    ("6m", "6 месяцев"),
+    ("year", "Год (365 дн.)"),
+    ("2y", "2 года"),
+    ("forever", "Навсегда"),
+    ("other", "Прочее"),
+)
+
+
+def _parse_payload_map(payload: Optional[str]) -> dict[str, str]:
+    if not payload:
+        return {}
+    out: dict[str, str] = {}
+    for item in payload.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if ":" in item:
+            k, v = item.split(":", 1)
+            out[k.strip()] = v.strip()
+        else:
+            out[item] = "1"
+    return out
+
+
+def _payment_subscription_days(p: _BestMonthPayment) -> Optional[int]:
+    raw_duration = _parse_payload_map(p.payload).get("duration")
+    if raw_duration and str(raw_duration).startswith("traffic"):
+        return None
+    days = _payload_duration_to_panel_days(raw_duration)
+    if days is not None:
+        return days
+    return _billing_duration_from_amount_fallback(p.amount_rub)
+
+
+def _duration_term_bucket(days: Optional[int]) -> str:
+    if days is None:
+        return "other"
+    if days == 7:
+        return "week"
+    if days in (30,):
+        return "month"
+    if days in (90, 120):
+        return "3m"
+    if days == 180:
+        return "6m"
+    if days == 365:
+        return "year"
+    if days == 730:
+        return "2y"
+    if days >= 5000:
+        return "forever"
+    return "other"
+
+
+def _month_start(year: int, month: int) -> datetime:
+    return datetime(year, month, 1, 0, 0, 0)
+
+
+def _month_end(year: int, month: int) -> datetime:
+    last = calendar.monthrange(year, month)[1]
+    return datetime(year, month, last, 23, 59, 59)
+
+
+def _iter_months(from_dt: datetime, to_dt: datetime) -> List[Tuple[int, int]]:
+    y, m = from_dt.year, from_dt.month
+    end_y, end_m = to_dt.year, to_dt.month
+    out: List[Tuple[int, int]] = []
+    while (y, m) <= (end_y, end_m):
+        out.append((y, m))
+        m += 1
+        if m > 12:
+            m = 1
+            y += 1
+    return out
+
+
+def _month_key_ru(year: int, month: int) -> str:
+    names = (
+        "", "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
+        "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
+    )
+    return f"{names[month]} {year}"
+
+
+async def _load_all_successful_payments(session) -> List[_BestMonthPayment]:
+    rows: List[_BestMonthPayment] = []
+
+    def _add(user_id, rub, tc, is_gift, payload):
+        if rub is None or tc is None:
+            return
+        rows.append(_BestMonthPayment(int(user_id), int(rub), tc, bool(is_gift), payload))
+
+    rub_models = (
+        (Payments, 1),
+        (PaymentsCards, 0),
+        (PaymentsPlategaCrypto, 1),
+        (PaymentsWataSBP, 1),
+        (PaymentsWataCard, 1),
+        (PaymentsFkSBP, 1),
+    )
+    for model, skip_amount in rub_models:
+        stmt = select(
+            model.user_id,
+            model.amount,
+            model.time_created,
+            model.is_gift,
+            model.payload,
+        ).where(model.status.in_(_PAYMENT_OK_STATUSES))
+        if skip_amount:
+            stmt = stmt.where(model.amount != 1)
+        else:
+            stmt = stmt.where(model.amount != 0)
+        for uid, amt, tc, is_gift, payload in (await session.execute(stmt)).all():
+            _add(uid, amt, tc, is_gift, payload)
+
+    stmt_stars = select(
+        PaymentsStars.user_id,
+        PaymentsStars.amount,
+        PaymentsStars.time_created,
+        PaymentsStars.is_gift,
+        PaymentsStars.payload,
+    ).where(PaymentsStars.status.in_(_PAYMENT_OK_STATUSES))
+    for uid, amt, tc, is_gift, payload in (await session.execute(stmt_stars)).all():
+        rub = _stars_amount_to_rub(amt)
+        if rub:
+            _add(uid, rub, tc, is_gift, payload)
+
+    stmt_crypto = select(
+        PaymentsCryptobot.user_id,
+        PaymentsCryptobot.amount,
+        PaymentsCryptobot.currency,
+        PaymentsCryptobot.time_created,
+        PaymentsCryptobot.is_gift,
+        PaymentsCryptobot.payload,
+    ).where(
+        PaymentsCryptobot.status.in_(_PAYMENT_OK_STATUSES),
+        PaymentsCryptobot.amount > 0.02,
+    )
+    for uid, amt, cur, tc, is_gift, payload in (await session.execute(stmt_crypto)).all():
+        rub = convert_crypto_to_rub(cur, str(amt))
+        if rub:
+            _add(uid, rub, tc, is_gift, payload)
+
+    return rows
+
+
+def _simulate_subscription_expirations(
+    payments_by_user: Dict[int, List[_BestMonthPayment]],
+) -> List[Tuple[int, datetime, bool]]:
+    """(user_id, дата окончания периода, продлили ли после истечения)."""
+    events: List[Tuple[int, datetime, bool]] = []
+    for uid, pays in payments_by_user.items():
+        sub_pays = sorted(
+            (
+                p for p in pays
+                if not p.is_gift and _payment_subscription_days(p) is not None
+            ),
+            key=lambda p: p.time_created,
+        )
+        if not sub_pays:
+            continue
+        end: Optional[datetime] = None
+        for p in sub_pays:
+            days = _payment_subscription_days(p)
+            if days is None:
+                continue
+            t = p.time_created
+            if end is not None and t >= end:
+                events.append((uid, end, True))
+                end = t + timedelta(days=days)
+            elif end is not None:
+                end = end + timedelta(days=days)
+            else:
+                end = t + timedelta(days=days)
+        if end is not None:
+            events.append((uid, end, False))
+    return events
+
+
+def _compute_best_month_stats(
+    all_payments: List[_BestMonthPayment],
+    months: List[Tuple[int, int]],
+) -> Dict[str, Dict[str, Any]]:
+    first_pay_by_user: Dict[int, datetime] = {}
+    for p in all_payments:
+        prev = first_pay_by_user.get(p.user_id)
+        if prev is None or p.time_created < prev:
+            first_pay_by_user[p.user_id] = p.time_created
+
+    pays_by_user: Dict[int, List[_BestMonthPayment]] = {}
+    for p in all_payments:
+        pays_by_user.setdefault(p.user_id, []).append(p)
+
+    expirations = _simulate_subscription_expirations(pays_by_user)
+
+    stats: Dict[str, Dict[str, Any]] = {}
+    for year, month in months:
+        start = _month_start(year, month)
+        end = _month_end(year, month)
+        key = _month_key_ru(year, month)
+
+        in_month = [p for p in all_payments if start <= p.time_created <= end]
+        payers = {p.user_id for p in in_month}
+        revenue = sum(p.amount_rub for p in in_month)
+        pay_count = len(in_month)
+        aov = revenue / pay_count if pay_count else 0.0
+
+        new_buyers = {
+            uid for uid in payers
+            if start <= first_pay_by_user[uid] <= end
+        }
+        repeat_buyers = {
+            uid for uid in payers
+            if first_pay_by_user[uid] < start
+        }
+
+        term_counts = {b[0]: 0 for b in _TERM_BUCKET_LABELS}
+        for p in in_month:
+            bucket = _duration_term_bucket(_payment_subscription_days(p))
+            term_counts[bucket] = term_counts.get(bucket, 0) + 1
+
+        expired_in_month = [
+            (uid, exp, renewed)
+            for uid, exp, renewed in expirations
+            if start <= exp <= end
+        ]
+        expired_total = len({uid for uid, _, _ in expired_in_month})
+        expired_renewed = len({uid for uid, _, renewed in expired_in_month if renewed})
+
+        stats[key] = {
+            "year": year,
+            "month": month,
+            "revenue": revenue,
+            "pay_count": pay_count,
+            "unique_payers": len(payers),
+            "new_buyers": len(new_buyers),
+            "repeat_buyers": len(repeat_buyers),
+            "aov": round(aov, 2),
+            "term_counts": term_counts,
+            "expired_renewed": expired_renewed,
+            "expired_total": expired_total,
+        }
+    return stats
+
+
+def _sync_build_best_month_excel(stats: Dict[str, Dict[str, Any]], months_order: List[str]) -> str:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "По месяцам"
+
+    term_headers = [label for _, label in _TERM_BUCKET_LABELS]
+    headers = [
+        "Месяц",
+        "Выручка (₽)",
+        "Кол-во платежей",
+        "Уникальных плательщиков",
+        "Новых покупателей",
+        "Повторных покупателей",
+        "Средний чек (₽)",
+        *term_headers,
+        "Истекло и продлили",
+        "Истекло всего",
+    ]
+    ws.append(headers)
+
+    header_font = Font(bold=True)
+    thin_border = Border(
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side(style="thin"),
+    )
+    for col in range(1, len(headers) + 1):
+        cell = ws.cell(row=1, column=col)
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = thin_border
+
+    for row_idx, month_key in enumerate(months_order, start=2):
+        row_data = stats.get(month_key, {})
+        terms = row_data.get("term_counts") or {}
+        row = [
+            month_key,
+            row_data.get("revenue", 0),
+            row_data.get("pay_count", 0),
+            row_data.get("unique_payers", 0),
+            row_data.get("new_buyers", 0),
+            row_data.get("repeat_buyers", 0),
+            row_data.get("aov", 0),
+        ]
+        for bucket_key, _ in _TERM_BUCKET_LABELS:
+            row.append(terms.get(bucket_key, 0))
+        row.append(row_data.get("expired_renewed", 0))
+        row.append(row_data.get("expired_total", 0))
+        ws.append(row)
+        for col in range(1, len(headers) + 1):
+            ws.cell(row=row_idx, column=col).border = thin_border
+            if col > 1:
+                ws.cell(row=row_idx, column=col).alignment = Alignment(horizontal="right")
+
+    for col in ws.columns:
+        max_len = max(len(str(c.value or "")) for c in col)
+        ws.column_dimensions[col[0].column_letter].width = min(max_len + 2, _EXCEL_COL_WIDTH_MAX)
+
+    ws.freeze_panes = "A2"
+
+    fd, path = tempfile.mkstemp(suffix=".xlsx")
+    os.close(fd)
+    wb.save(path)
+    return path
 
 
 def _sync_build_analytics_excel(monthly_data: dict, daily_data_by_month: dict) -> str:
@@ -1006,4 +1341,53 @@ async def anal_payment_export(message: Message):
 
     except Exception as e:
         logger.exception("Ошибка при экспорте /anal_payment")
+        await message.answer(f"❌ Ошибка: {str(e)}")
+
+
+@router.message(Command(commands=["check_best_month"]))
+async def check_best_month_export(message: Message):
+    if message.from_user.id not in ADMIN_IDS:
+        await message.answer("❌ Команда доступна только администраторам.")
+        return
+
+    await message.answer("🔄 Собираю помесячную таблицу с начала регистраций...")
+
+    try:
+        now = datetime.now()
+        async with AsyncSessionLocal() as session:
+            min_reg = (await session.execute(select(func.min(Users.create_user)))).scalar()
+            if min_reg is None:
+                await message.answer("❌ В БД нет пользователей.")
+                return
+
+            all_payments = await _load_all_successful_payments(session)
+
+        months = _iter_months(min_reg, now)
+        stats = _compute_best_month_stats(all_payments, months)
+        months_order = [_month_key_ru(y, m) for y, m in months]
+
+        export_path = await asyncio.to_thread(_sync_build_best_month_excel, stats, months_order)
+        try:
+            await message.answer_document(
+                document=FSInputFile(
+                    export_path,
+                    filename=f"check_best_month_{now.strftime('%Y%m%d')}.xlsx",
+                ),
+                caption=(
+                    "📊 Помесячная таблица (/check_best_month)\n"
+                    f"Период: {_month_key_ru(min_reg.year, min_reg.month)} — "
+                    f"{_month_key_ru(now.year, now.month)}\n"
+                    f"Месяцев: {len(months_order)}"
+                ),
+            )
+        finally:
+            try:
+                os.remove(export_path)
+            except OSError:
+                pass
+
+        logger.info("Админ %s выполнил /check_best_month", message.from_user.id)
+
+    except Exception as e:
+        logger.exception("Ошибка в /check_best_month")
         await message.answer(f"❌ Ошибка: {str(e)}")

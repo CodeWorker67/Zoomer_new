@@ -35,6 +35,7 @@ from handlers import (
     handlers_devices,
     handlers_patner,
     handlers_wl_traffic,
+    handlers_wheel,
 )
 from sheduler.time_mes import send_message_cron
 from logging_config import logger
@@ -65,6 +66,7 @@ async def main() -> None:
             bypass_user_ids=ADMIN_IDS,
         )
     )
+    dp.include_router(handlers_wheel.router)
     dp.include_router(handlers_patner.router)
     dp.include_router(handlers_broadcast.router)
     dp.include_router(handlers_start_prize.router)

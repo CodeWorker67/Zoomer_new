@@ -358,6 +358,7 @@ async def _ensure_landing_whatsapp_user(
     profile_name: str,
     site_url: Optional[str],
     partner: str,
+    landing_stamp: str = "",
 ) -> tuple[Any, Any]:
     pair = await sql.get_landing_user_by_whatsapp_id(wa_id)
     if pair is not None:
@@ -365,7 +366,10 @@ async def _ensure_landing_whatsapp_user(
         await sql.set_landing_email_verified(int(user.id), True)
         return user, site
     phone = _whatsapp_phone_from_wa_id(wa_id)
-    stamp = profile_name[:100] if profile_name else "whatsapp"
+    if landing_stamp:
+        stamp = landing_stamp[:100]
+    else:
+        stamp = profile_name[:100] if profile_name else "whatsapp"
     internal_id = await sql.register_landing_whatsapp_user(
         wa_id,
         stamp=stamp,
@@ -385,14 +389,6 @@ async def _handle_whatsapp_incoming_message(
     profile_name: str,
     text: str,
 ) -> None:
-    normalized = (text or "").strip().lower()
-    triggers = ("start", "/start", "старт", "привет", "hello", "hi")
-    if normalized and normalized not in triggers and not normalized.startswith("start"):
-        await send_text_message(
-            wa_id,
-            "Для входа на сайт отправьте START или нажмите «Отправить» в чате после перехода по ссылке с сайта.",
-        )
-        return
     code = await _issue_whatsapp_login_code(
         wa_id=wa_id,
         profile_name=profile_name,
@@ -412,6 +408,7 @@ async def _ensure_landing_phone_user(
     *,
     site_url: Optional[str],
     partner: str,
+    stamp: str = "",
 ) -> tuple[Any, Any]:
     pair = await sql.get_landing_user_by_phone(phone)
     if pair is not None:
@@ -422,6 +419,7 @@ async def _ensure_landing_phone_user(
         phone,
         site_url=site_url,
         partner=partner,
+        stamp=stamp,
     )
     pair = await sql.get_landing_user_by_internal_id(internal_id)
     if pair is None:
@@ -495,9 +493,38 @@ def _parse_partner_ref(raw: Optional[str]) -> Optional[str]:
     return str(pid)
 
 
+def _parse_landing_stamp(raw: Optional[str]) -> str:
+    """Метка из ?start=, если это не partner id."""
+    if not raw:
+        return ""
+    value = str(raw).strip()
+    if not value or value.startswith("partner_"):
+        return ""
+    if _parse_partner_ref(value):
+        return ""
+    return value[:100]
+
+
+def _landing_attribution(
+    *,
+    partner_raw: Optional[str],
+    stamp_raw: Optional[str],
+    start_query: Optional[str] = None,
+) -> tuple[str, str]:
+    partner = _parse_partner_ref(partner_raw) or ""
+    stamp = _parse_landing_stamp(stamp_raw)
+    if start_query:
+        if not partner:
+            partner = _parse_partner_ref(start_query) or ""
+        if not stamp:
+            stamp = _parse_landing_stamp(start_query)
+    return partner, stamp
+
+
 class EmailIn(BaseModel):
     email: EmailStr
     partner: Optional[str] = None
+    stamp: Optional[str] = None
 
 
 class VerifyCodeIn(BaseModel):
@@ -508,6 +535,7 @@ class VerifyCodeIn(BaseModel):
 class GoogleAuthIn(BaseModel):
     credential: str
     partner: Optional[str] = None
+    stamp: Optional[str] = None
 
 
 class CreatePaymentIn(BaseModel):
@@ -539,11 +567,13 @@ class RemovePasswordIn(BaseModel):
 class PhoneStartIn(BaseModel):
     phone: str = Field(min_length=10, max_length=32)
     partner: Optional[str] = None
+    stamp: Optional[str] = None
 
 
 class WhatsAppVerifyIn(BaseModel):
     code: str = Field(min_length=6, max_length=6)
     partner: Optional[str] = None
+    stamp: Optional[str] = None
 
 
 @landing_router.post("/auth/check-email")
@@ -575,12 +605,16 @@ async def landing_send_code(body: EmailIn, request: Request):
     em = str(body.email).strip().lower()
     existing = await sql.get_landing_user_by_email(em)
     if existing is None:
-        partner_raw = body.partner or request.query_params.get("start")
-        partner = _parse_partner_ref(partner_raw) or ""
+        partner, stamp = _landing_attribution(
+            partner_raw=body.partner,
+            stamp_raw=body.stamp,
+            start_query=request.query_params.get("start"),
+        )
         await sql.register_landing_email_user(
             em,
             site_url=_site_url_from_request(request),
             partner=partner,
+            stamp=stamp,
         )
     await _send_landing_otp(em)
     return {"success": True, "email": em}
@@ -650,13 +684,17 @@ async def landing_google(body: GoogleAuthIn, request: Request):
             user, site = by_email
             internal_id = int(user.id)
         else:
-            partner_raw = body.partner or request.query_params.get("start")
-            partner = _parse_partner_ref(partner_raw) or ""
+            partner, stamp = _landing_attribution(
+                partner_raw=body.partner,
+                stamp_raw=body.stamp,
+                start_query=request.query_params.get("start"),
+            )
             internal_id = await sql.register_landing_google_user(
                 em,
                 google_sub,
                 site_url=_site_url_from_request(request),
                 partner=partner,
+                stamp=stamp,
             )
             pair = await sql.get_landing_user_by_internal_id(internal_id)
             if pair is None:
@@ -676,8 +714,11 @@ async def landing_phone_start(body: PhoneStartIn, request: Request):
     _rate_limit_or_raise(_client_ip(request), "phone-start", max_req=5, window=300)
     _cleanup_phone_sessions()
     phone = _normalize_phone(body.phone)
-    partner_raw = body.partner or request.query_params.get("start")
-    partner = _parse_partner_ref(partner_raw) or ""
+    partner, stamp = _landing_attribution(
+        partner_raw=body.partner,
+        stamp_raw=body.stamp,
+        start_query=request.query_params.get("start"),
+    )
     site_url = _site_url_from_request(request)
     webhook = _loginbot_webhook_url(request)
     try:
@@ -703,6 +744,7 @@ async def landing_phone_start(body: PhoneStartIn, request: Request):
         "status": "pending",
         "created_at": time.time(),
         "partner": partner,
+        "stamp": stamp,
         "site_url": site_url,
         "client_ip": _client_ip(request),
         "internal_id": None,
@@ -740,6 +782,7 @@ async def landing_phone_webhook(request: Request):
                 session["phone"],
                 site_url=session.get("site_url"),
                 partner=session.get("partner") or "",
+                stamp=session.get("stamp") or "",
             )
             session["internal_id"] = int(user.id)
         except Exception as e:
@@ -767,6 +810,7 @@ async def landing_phone_status(request_id: str, request: Request):
                 session["phone"],
                 site_url=session.get("site_url"),
                 partner=session.get("partner") or "",
+                stamp=session.get("stamp") or "",
             )
             internal_id = int(user.id)
             session["internal_id"] = internal_id
@@ -825,14 +869,18 @@ async def landing_whatsapp_verify_code(body: WhatsAppVerifyIn, request: Request)
             _whatsapp_wa_id_active_code.pop(wa_id, None)
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Код истёк, запросите новый в WhatsApp")
     wa_id = str(session.get("wa_id") or "")
-    partner_raw = body.partner or request.query_params.get("start")
-    partner = _parse_partner_ref(partner_raw) or session.get("partner") or ""
+    partner, stamp = _landing_attribution(
+        partner_raw=body.partner or session.get("partner"),
+        stamp_raw=body.stamp or session.get("stamp"),
+        start_query=request.query_params.get("start"),
+    )
     site_url = session.get("site_url") or _site_url_from_request(request)
     user, site = await _ensure_landing_whatsapp_user(
         wa_id,
         profile_name=str(session.get("profile_name") or ""),
         site_url=site_url,
         partner=str(partner),
+        landing_stamp=stamp,
     )
     _whatsapp_auth_codes.pop(body.code, None)
     _whatsapp_wa_id_active_code.pop(wa_id, None)

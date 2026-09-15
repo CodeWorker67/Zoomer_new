@@ -54,6 +54,8 @@ LANDING_GOOGLE_CLIENT_ID: Optional[str] = (
 LANDING_SITE_URL: str = (
     os.environ.get("LANDING_SITE_URL") or "http://localhost:5173"
 ).strip().rstrip("/")
+# Telegram Mini App «колесо фортуны» (HTTPS, для тестов — ngrok на Vite zoomer_wheel).
+WHEEL_MINIAPP_URL: str = (os.environ.get("WHEEL_MINIAPP_URL") or "").strip().rstrip("/")
 WEB_API_PORT: int = int(os.environ.get("WEB_API_PORT", "8080"))
 # Публичный URL бэкенда (для webhook LoginBot). Пример: https://api.example.com
 WEB_API_PUBLIC_URL: str = (os.environ.get("WEB_API_PUBLIC_URL") or "").strip().rstrip("/")

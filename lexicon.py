@@ -780,12 +780,82 @@ def _gift_benefit_pct(duration_key: str, price: int) -> int | None:
 
 
 TICKET_CUSTOM_EMOJI_ID = '5269265581827204458'
-TICKET_EMOJI_HTML = f'<tg-emoji emoji-id="{TICKET_CUSTOM_EMOJI_ID}">🎟️</tg-emoji>'
+TICKET_CUSTOM_EMOJI_IDS = ('5278489732764967424', '5278612968261591289')
+TICKET_EMOJI_HTML = ''.join(
+    f'<tg-emoji emoji-id="{eid}">🎟️</tg-emoji>' for eid in TICKET_CUSTOM_EMOJI_IDS
+)
 
 _ADMIN_BUY_LOTTERY_LINE = (
     f'{TICKET_EMOJI_HTML}Покупая любой тариф, вы автоматически участвуете '
     f'в розыгрыше более 100 призов{TICKET_EMOJI_HTML}'
 )
+
+RAFFLE_CAPTION = (
+    '🎁 <b>ЗУМЕРСКИЙ ДАРИТ — 100 ПРИЗОВЫХ МЕСТ! iPhone 18 pro</b>, '
+    'iPhone duo и еще 98 ценных призов!⚡️\n\n'
+    'Нам 2 года! В честь дня рождения разыгрываем технику, игры, '
+    'денежные призы и годовые подписки 🔥\n'
+    '<blockquote expandable><b>Что можно выиграть:</b>\n\n'
+    '🏆 <b>1–2 места:</b> iPhone 18 Pro\n'
+    '📱 <b>3–4 места:</b> iPhone Duo\n'
+    '📱 <b>5–9 места:</b> iPhone 17 Pro Max\n'
+    '📱 <b>10–13 места:</b> iPhone Air\n'
+    '🎮 <b>14–15 места:</b> PlayStation 5\n'
+    '📲 <b>16–18 места:</b> iPad\n'
+    '🎧 <b>19–20 места:</b> AirPods Max\n'
+    '💻 <b>21–22 места:</b> MacBook\n'
+    '⌚️ <b>23–25 места:</b> Apple Watch\n'
+    '🎮 <b>26–30 места:</b> GTA 6\n'
+    '🎧 <b>31–35 места:</b> AirPods\n'
+    '💸 <b>36–50 места:</b> по 5 000 ₽\n'
+    '💸 <b>51–75 места:</b> по 2 000 ₽\n'
+    '💸 <b>76–90 места:</b> по 1 000 ₽\n'
+    '💜 <b>91–100 места:</b> по году подписки на Зумерский VPN</blockquote>\n\n'
+    '🎟 <b>Как получить билетики?</b>\n'
+    '<blockquote>Покупай или продлевай подписку, а также дари VPN близким через бота.</blockquote>\n'
+    '<blockquote><b>За каждый оплаченный месяц — 1 билетик:</b></blockquote>\n'
+    '<blockquote>3 месяца = 3 билета, год = 12 билетов.</blockquote>\n'
+    'Все билетики складываются. Количество покупок и подарков не ограничено!'
+)
+
+_RAFFLE_TOP_PLACE_EMOJI = (
+    '',
+    '🥇',
+    '🥈',
+    '🥉',
+    '4️⃣',
+    '5️⃣',
+    '6️⃣',
+    '7️⃣',
+    '8️⃣',
+    '9️⃣',
+    '🔟',
+)
+
+
+def tickets_word(n: int) -> str:
+    abs_n = abs(int(n)) % 100
+    if 11 <= abs_n <= 14:
+        return 'билетов'
+    last = abs_n % 10
+    if last == 1:
+        return 'билет'
+    if 2 <= last <= 4:
+        return 'билета'
+    return 'билетов'
+
+
+def raffle_top_caption(rows: list[tuple[int, int]]) -> str:
+    lines = ['🏆 <b>Топ-10 держателей билетов</b>\n']
+    if not rows:
+        lines.append('Пока здесь пусто — билетики появятся после покупок и подарков 🎟')
+        return '\n'.join(lines)
+    for i, (_user_id, count) in enumerate(rows, start=1):
+        emoji = _RAFFLE_TOP_PLACE_EMOJI[i] if i < len(_RAFFLE_TOP_PLACE_EMOJI) else '🎟'
+        lines.append(
+            f'{emoji} <b>{i} место</b> — <b>{count}</b> {tickets_word(count)}'
+        )
+    return '\n'.join(lines)
 
 
 def buy_caption(*, is_admin: bool = False) -> str:
@@ -798,14 +868,38 @@ def buy_caption(*, is_admin: bool = False) -> str:
     )
 
 
-def format_gift_tariff_label(duration_key: str, *, repeat_giver: bool) -> str:
+def buy_menu_caption(*, is_admin: bool = False) -> str:
+    text = lexicon['buy_menu']
+    if not is_admin:
+        return text
+    return f'{text}\n\n{_ADMIN_BUY_LOTTERY_LINE}'
+
+
+def gift_menu_caption(*, is_admin: bool = False, repeat_giver: bool = False) -> str:
+    text = lexicon['gift_start_repeat'] if repeat_giver else lexicon['gift_start']
+    if not is_admin:
+        return text
+    return f'{text}\n\n{_ADMIN_BUY_LOTTERY_LINE}'
+
+
+def format_gift_tariff_label(
+    duration_key: str,
+    *,
+    repeat_giver: bool,
+    is_admin: bool = False,
+) -> str:
     price = resolve_gift_price(duration_key, repeat_giver=repeat_giver)
-    icon = _GIFT_TARIFF_ICONS.get(duration_key, '')
     if duration_key == '730':
         period = '2 года'
     else:
         period = f'{duration_key} дней'
     benefit = _gift_benefit_pct(duration_key, price)
     if benefit is not None:
-        return f'{icon} {period} — {price} руб (выгода −{benefit}%)'
-    return f'{icon} {period} — {price} руб'
+        body = f'{period} — {price} руб (выгода −{benefit}%)'
+    else:
+        body = f'{period} — {price} руб'
+    if is_admin:
+        from keyboard import admin_ticket_prefix
+        return f'{admin_ticket_prefix(duration_key)}{body}'
+    icon = _GIFT_TARIFF_ICONS.get(duration_key, '')
+    return f'{icon} {body}' if icon else body

@@ -52,6 +52,7 @@ class Users(Base):
     partner_flag = Column(Boolean, default=False)
     trafic_wl = Column(Float, default=0.0)
     limit_wl = Column(Float, default=0.0)
+    tickets = Column(Integer, default=0)
 
 
 class FirstSite(Base):

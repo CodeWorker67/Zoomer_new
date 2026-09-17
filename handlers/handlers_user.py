@@ -49,7 +49,7 @@ from aiogram.types import (
 )
 from aiogram.filters import BaseFilter, ChatMemberUpdatedFilter, KICKED, MEMBER, Command
 from handlers.handlers_wheel_discount import show_tariff_with_optional_discount
-from lexicon import TRIAL_DISCOUNT_BANNER, buy_caption, lexicon
+from lexicon import TRIAL_DISCOUNT_BANNER, buy_caption, buy_menu_caption, gift_menu_caption, lexicon
 from utils.trial_discount import is_user_eligible_for_trial_discount
 from wl_traffic.service import (
     credit_wl_subscription_bonus,
@@ -96,6 +96,7 @@ async def _show_main_menu(
         buy_primary=not active,
         sub_url=sub_url or None,
         show_trial=not in_panel,
+        show_raffle=user.id in ADMIN_IDS,
     )
 
     if isinstance(source, CallbackQuery):
@@ -346,7 +347,7 @@ async def buy_vpn_cb(callback: CallbackQuery):
     await edit_or_send_photo(
         callback,
         "buy_subscription",
-        lexicon['buy_menu'],
+        buy_menu_caption(is_admin=callback.from_user.id in ADMIN_IDS),
         keyboard_buy_menu(),
     )
 
@@ -723,12 +724,19 @@ async def gift_subscription_start(callback: CallbackQuery):
     await callback.answer()
     """Начало процесса подарка подписки"""
     repeat_giver = await sql.is_gift_giver(callback.from_user.id)
-    kb = keyboard_gift_tariff_repeat() if repeat_giver else keyboard_gift_tariff()
-    text = lexicon['gift_start_repeat'] if repeat_giver else lexicon['gift_start']
+    is_admin = callback.from_user.id in ADMIN_IDS
+    kb = (
+        keyboard_gift_tariff_repeat(is_admin=is_admin)
+        if repeat_giver
+        else keyboard_gift_tariff(is_admin=is_admin)
+    )
     await edit_or_send_photo(
         callback,
         "buy_subscription",
-        text,
+        gift_menu_caption(
+            is_admin=is_admin,
+            repeat_giver=repeat_giver,
+        ),
         kb,
     )
 
@@ -833,7 +841,7 @@ async def handle_back_to_buy_menu(callback: CallbackQuery):
     await edit_or_send_photo(
         callback,
         "buy_subscription",
-        lexicon['buy_menu'],
+        buy_menu_caption(is_admin=callback.from_user.id in ADMIN_IDS),
         keyboard_buy_menu(),
     )
 
@@ -850,12 +858,19 @@ async def handle_back_to_gift_menu(callback: CallbackQuery):
     """Обработчик для возврата в меню подарка подписки."""
     await callback.answer()
     repeat_giver = await sql.is_gift_giver(callback.from_user.id)
-    kb = keyboard_gift_tariff_repeat() if repeat_giver else keyboard_gift_tariff()
-    text = lexicon['gift_start_repeat'] if repeat_giver else lexicon['gift_start']
+    is_admin = callback.from_user.id in ADMIN_IDS
+    kb = (
+        keyboard_gift_tariff_repeat(is_admin=is_admin)
+        if repeat_giver
+        else keyboard_gift_tariff(is_admin=is_admin)
+    )
     await edit_or_send_photo(
         callback,
         "buy_subscription",
-        text,
+        gift_menu_caption(
+            is_admin=is_admin,
+            repeat_giver=repeat_giver,
+        ),
         kb,
     )
 

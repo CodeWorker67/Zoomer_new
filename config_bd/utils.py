@@ -468,6 +468,17 @@ class AsyncSQL:
         async with self.session_factory() as session:
             return await session.get(Users, internal_id)
 
+    async def get_top_ticket_holders(self, limit: int = 10) -> List[Tuple[int, int]]:
+        async with self.session_factory() as session:
+            stmt = (
+                select(Users.user_id, Users.tickets)
+                .where(Users.tickets > 0)
+                .order_by(Users.tickets.desc(), Users.user_id.asc())
+                .limit(limit)
+            )
+            result = await session.execute(stmt)
+            return [(int(uid), int(tickets or 0)) for uid, tickets in result.all()]
+
     async def next_negative_user_id(self) -> int:
         """
         Следующий отрицательный user_id для first_site / gift.

@@ -63,12 +63,21 @@ def chanel_keyboard():
 ABOUT_SERVICE_CB = "about_service"
 
 
+RAFFLE_CB = "raffle"
+RAFFLE_PARTICIPATE_CB = "raffle_participate"
+RAFFLE_TOP_CB = "raffle_top"
+RAFFLE_BACK_CB = "raffle_back"
+RAFFLE_RULES_URL = "https://telegra.ph/Usloviya-rozygrysha-Zumerskij-darit-09-17"
+RAFFLE_BUTTON_EMOJI_ID = "6071303599973995501"
+
+
 def keyboard_start(
     *,
     has_active_sub: bool = False,
     buy_primary: bool = True,
     sub_url: Optional[str] = None,
     show_trial: bool = False,
+    show_raffle: bool = False,
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     if has_active_sub:
@@ -94,6 +103,16 @@ def keyboard_start(
     if buy_primary:
         buy_kwargs["style"] = STYLE_PRIMARY
     rows.append([InlineKeyboardButton(**buy_kwargs)])
+    if show_raffle:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="Розыгрыш",
+                    callback_data=RAFFLE_CB,
+                    icon_custom_emoji_id=RAFFLE_BUTTON_EMOJI_ID,
+                )
+            ]
+        )
     if show_trial:
         rows.append(
             [InlineKeyboardButton(text="Попробовать бесплатно", callback_data="free_vpn")]
@@ -186,6 +205,22 @@ def keyboard_buy_menu() -> InlineKeyboardMarkup:
     )
 
 
+def keyboard_raffle(*, show_back_to_desc: bool = False) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text="Принять участие", callback_data=RAFFLE_PARTICIPATE_CB)],
+        [InlineKeyboardButton(text="Условия участия в конкурсе", url=RAFFLE_RULES_URL)],
+    ]
+    if show_back_to_desc:
+        rows.append(
+            [InlineKeyboardButton(text="К описанию розыгрыша", callback_data=RAFFLE_BACK_CB)]
+        )
+    else:
+        rows.append(
+            [InlineKeyboardButton(text="Топ держателей билетов", callback_data=RAFFLE_TOP_CB)]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def keyboard_earn_with_us() -> InlineKeyboardMarkup:
     return create_kb(
         1,
@@ -214,19 +249,25 @@ _USER_TARIFF_EMOJI = {
     '730': '🔥 ',
 }
 
-_ADMIN_TARIFF_COUNTS = {
-    '30': '1 ',
-    '90': '3 ',
-    '180': '6 ',
-    '365': '12 ',
-    '730': '24 ',
+_ADMIN_TARIFF_TICKETS = {
+    '30': 1,
+    '90': 3,
+    '180': 6,
+    '365': 12,
+    '730': 24,
 }
+
+
+def admin_ticket_prefix(key: str) -> str:
+    n = _ADMIN_TARIFF_TICKETS.get(key)
+    if not n:
+        return ''
+    return f'{n}🎟 '
 
 
 def tariff_button_label(key: str, *, is_admin: bool = False) -> str:
     if is_admin:
-        count = _ADMIN_TARIFF_COUNTS.get(key, '')
-        return f'{count}{_TARIFF_LABELS[key]}'
+        return f'{admin_ticket_prefix(key)}{_TARIFF_LABELS[key]}'
     return f'{_USER_TARIFF_EMOJI[key]}{_TARIFF_LABELS[key]}'
 
 
@@ -243,8 +284,7 @@ def trial_discount_tariff_button_text(key: str, *, is_admin: bool = False) -> st
         _TARIFF_LABELS[key],
     )
     if is_admin:
-        count = _ADMIN_TARIFF_COUNTS.get(key, '')
-        return f'{count}{label}'
+        return f'{admin_ticket_prefix(key)}{label}'
     return f'{_USER_TARIFF_EMOJI[key]}{label}'
 
 
@@ -260,19 +300,9 @@ def _tariff_button_kwargs(*, is_admin: bool = False, trial_discount: bool = Fals
     }
 
 
-def _admin_tariff_button_icons() -> dict[str, str]:
-    from lexicon import TICKET_CUSTOM_EMOJI_ID
-
-    return {
-        f'r_{key}': TICKET_CUSTOM_EMOJI_ID
-        for key in _ADMIN_TARIFF_COUNTS
-    }
-
-
 def _tariff_kb(*, is_admin: bool = False, trial_discount: bool = False, **extra: str) -> InlineKeyboardMarkup:
     return create_kb(
         1,
-        icons=_admin_tariff_button_icons() if is_admin else None,
         **_tariff_button_kwargs(is_admin=is_admin, trial_discount=trial_discount),
         **extra,
     )
@@ -318,30 +348,28 @@ def keyboard_tariff_old():
     )
 
 
-def keyboard_gift_tariff():
+def keyboard_gift_tariff(*, is_admin: bool = False):
     return create_kb(
         1,
-        gift_r_7='👌 7 дней — 99 руб',
-        gift_r_30='🤝 30 дней — 299 руб',
-        gift_r_90='✅ 90 дней — 749 руб (выгода −17%)',
-        gift_r_180='🏆 180 дней — 1349 руб (выгода −25%)',
-        gift_r_365='💎 365 дней — 2399 руб (выгода −33%)',
-        gift_r_730='🔥 2 года — 3699 руб (выгода −50%)',
+        **{
+            f'gift_r_{key}': tariff_button_label(key, is_admin=is_admin)
+            for key in _TARIFF_LABELS
+        },
         back_to_buy_menu='🔙 Назад',
     )
 
 
-def keyboard_gift_tariff_repeat():
+def keyboard_gift_tariff_repeat(*, is_admin: bool = False):
     from lexicon import format_gift_tariff_label
 
     return create_kb(
         1,
-        gift_r_7=format_gift_tariff_label('7', repeat_giver=True),
-        gift_r_30=format_gift_tariff_label('30', repeat_giver=True),
-        gift_r_90=format_gift_tariff_label('90', repeat_giver=True),
-        gift_r_180=format_gift_tariff_label('180', repeat_giver=True),
-        gift_r_365=format_gift_tariff_label('365', repeat_giver=True),
-        gift_r_730=format_gift_tariff_label('730', repeat_giver=True),
+        **{
+            f'gift_r_{key}': format_gift_tariff_label(
+                key, repeat_giver=True, is_admin=is_admin
+            )
+            for key in _TARIFF_LABELS
+        },
         back_to_buy_menu='🔙 Назад',
     )
 

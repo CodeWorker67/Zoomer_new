@@ -83,6 +83,13 @@ _IMPORT_PHOTOS_DEFAULT = {
     ],
 }
 
+_RAFFLE_VIDEO_ZOOMER = (
+    "BAACAgIAAxkBAAHq3gABaquzOhJJgtP8-SkBaHuniZQAATpUAAKjsQACaghQSahijgG2HlIwPQQ"
+)
+_RAFFLE_VIDEO_DEFAULT = (
+    "BAACAgIAAxkBAAIMuWqrs40So0XdKUkhCpKQKBZnxeToAAKjsQACaghQSXl8g-RfrcMCPQQ"
+)
+
 _cached_username: Optional[str] = None
 
 
@@ -118,6 +125,12 @@ def menu_photo(key: str) -> str:
     if key not in photos:
         raise KeyError(f"Unknown menu photo key: {key}")
     return photos[key]
+
+
+def raffle_video() -> str:
+    if is_zoomer_bot():
+        return _RAFFLE_VIDEO_ZOOMER
+    return _RAFFLE_VIDEO_DEFAULT
 
 
 def import_photos(app_key: str) -> list[str]:

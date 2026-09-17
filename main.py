@@ -38,6 +38,7 @@ from handlers import (
     handlers_wl_traffic,
     handlers_wheel,
     handlers_wheel_discount,
+    handlers_raffle,
 )
 from sheduler.time_mes import send_message_cron
 from logging_config import logger
@@ -72,6 +73,7 @@ async def main() -> None:
     dp.include_router(handlers_patner.router)
     dp.include_router(handlers_broadcast.router)
     dp.include_router(handlers_start_prize.router)
+    dp.include_router(handlers_raffle.router)
     dp.include_router(handlers_admin.router)
     dp.include_router(handlers_import.router)
     dp.include_router(handlers_devices.router)

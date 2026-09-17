@@ -82,15 +82,24 @@ lexicon = {
     'to_sub': 'Выберите подписку и войдите в личный кабинет, далее следуйте инструкциям.',
 
     'payment_link': 'Тариф - 💫 подписка на VPN PRO\n'
-                    '4 сервера из разных стран на выбор.\n'
-                    '5 устройств, безлимитный трафик на обычные сервера.{wl_bonus}\n\n'
+                    'Множество серверов из разных стран на выбор.\n'
+                    '5 устройств, безлимитный трафик на обычные сервера.\n'
+                    '{tariff_summary}{wl_bonus}\n\n'
                     '<b>Подписка начисляется в течении 1 часа</b>',
 
-    'wl_bonus_line': '\n\n📡 Антиглушилка: <b>+{gb:g} GB</b> трафика включено в тариф.',
+    'wl_bonus_line': '\n📡 Антиглушилка: <b>+{gb:g} GB</b> трафика включено в тариф.',
 
     'wl_bonus_line_forever': (
-        '\n\n📡 Антиглушилка: <b>+{gb:g} GB</b> сразу при активации,\n'
+        '\n📡 Антиглушилка: <b>+{gb:g} GB</b> сразу при активации,\n'
         'далее <b>+{gb:g} GB каждый месяц</b> (1-го числа) ♾️'
+    ),
+
+    'secret_tariff_checkout_intro': (
+        'Секретный тариф - 💫 подписка на VPN PRO\n'
+        'Множество серверов из разных стран на выбор.\n'
+        '5 устройств, безлимитный трафик.\n'
+        '{tariff_summary}\n\n'
+        'СКИДКА 40% - 149 руб за месяц'
     ),
 
     'payment_link_white': 'Тариф - 🦾 Включи мобильный интернет\n'
@@ -158,6 +167,40 @@ lexicon = {
                         "Перешли ему сообщение со ссылкой, чтобы подарить ему подписку!",
 
     'payment_gift_web': (
+        "🌐 <b>Также можно активировать подарок без привязки к Telegram!</b>\n\n"
+        "Получателю достаточно перейти по ссылке — подписка активируется автоматически, "
+        "а на экране откроется личный кабинет для подключения к VPN 🔐\n\n"
+        "⬇️\n"
+        "http://4zoomer.top/gift?{0}\n\n"
+        "⚠️ <i>Страница открывается один раз — сохраните ссылку на подписку!</i>"
+    ),
+
+    'wheel_vpn_success': (
+        "🎡 <b>Выигрыш колеса фортуны!</b>\n\n"
+        "✅ Подписка успешно {0}!\n"
+        "└ до: {1}\n\n"
+        "📅 Добавлено дней: {2}\n\n"
+        "🔑 Ваш ключ:\n"
+        "<code>{3}</code>"
+    ),
+
+    'wheel_payment_gift': (
+        "🎡 <b>Выигрыш колеса фортуны!</b>\n\n"
+        "🎁 Подарок: {0} дней подписки на VPN{1}\n\n"
+        "Переходи по ссылке, чтобы моментально активировать доступ:\n"
+        "⬇️\n\n"
+        "https://t.me/zoomerskyvpn_bot?start=gift_{2}\n\n"
+        "Пользуйся без ограничений🫶"
+    ),
+
+    'wheel_payment_gift_faq': (
+        "⬆️⬆️⬆️⬆️⬆️\n"
+        "Выше автоматически сформированное сообщение для подарка другу (выигрыш колеса фортуны).\n"
+        "Перешли ему сообщение со ссылкой, чтобы подарить подписку!"
+    ),
+
+    'wheel_payment_gift_web': (
+        "🎡 <b>Выигрыш колеса фортуны</b>\n\n"
         "🌐 <b>Также можно активировать подарок без привязки к Telegram!</b>\n\n"
         "Получателю достаточно перейти по ссылке — подписка активируется автоматически, "
         "а на экране откроется личный кабинет для подключения к VPN 🔐\n\n"
@@ -583,7 +626,43 @@ YouTube сам себя не посмотрит, а контент уже жде
         '🔄 Обновите подписку в приложении — '
         'сервер <b>Антиглушилка</b> появится сразу или автоматически в течение часа.'
     ),
+
+    'wheel_discount_intro': '🎡 <b>Скидка с колеса фортуны</b>',
+    'wheel_discount_warning': (
+        '⚠️ <b>Внимание!</b> При выборе скидки она <b>активируется</b> (количество уменьшится) '
+        'и нужно оплатить выбранный тариф, иначе скидка сгорит.\n'
+        'Перед выбором убедитесь, что выбрали услугу, которую хотели купить.'
+    ),
+    'wheel_discount_pick': 'Выберите скидку для <b>этой</b> покупки:',
+    'wheel_discount_tariff_sub_inline': (
+        '📅 Срок подписки: {duration}\n'
+        '💰 Цена: {price} ₽'
+    ),
+    'wheel_discount_tariff_gift_inline': (
+        '🎁 Подарок: {duration}\n'
+        '💰 Цена: {price} ₽'
+    ),
+    'wheel_discount_tariff_traffic': (
+        '📶 Пакет Антиглушилка: {gb} GB\n'
+        '💰 Цена: {price} ₽'
+    ),
+    'wheel_discount_product_sub': '📦 Подписка: <b>{days}</b> дней',
+    'wheel_discount_product_gift': '🎁 Подарок: <b>{days}</b> дней',
+    'wheel_discount_product_traffic': '📶 Трафик Антиглушилка: <b>{gb} GB</b>',
+    'wheel_discount_applied': 'Скидка −{pct}% активирована',
+    'wheel_discount_activate_fail': 'Не удалось активировать скидку',
+    'wheel_discount_none_ok': 'Оплата без скидки',
+    'wheel_discount_empty': 'Нет доступных скидок этого номинала',
+    'wheel_discount_reserve_fail': 'Не удалось зарезервировать скидку',
+    'wheel_discount_pay_sub': 'Выберите способ оплаты:',
+    'wheel_discount_pay_gift': 'Выберите способ оплаты подарка:',
+    'wheel_discount_total': 'Итого: <b>{final_rub} ₽</b> (−{pct}%)',
+    'wheel_discount_total_no_disc': 'Итого: <b>{final_rub} ₽</b>',
 }
+
+TRIAL_DISCOUNT_BANNER = (
+    'Вам <b>скидка 20%</b> на первую покупку подписки после триала!'
+)
 
 dct_price = {
     '7': 99,
@@ -598,6 +677,31 @@ dct_price = {
     '5000sale': 2790,
     '30secret': 149,
 }
+
+_TRIAL_DISCOUNT_STAR_BASE = {
+    key: val for key, val in dct_price.items()
+}
+
+
+def trial_discounted_rub(duration_key: str) -> int:
+    from payments.tariff_gate import normalize_tariff_duration_key
+
+    key = normalize_tariff_duration_key(duration_key)
+    base = dct_price.get(key)
+    if base is None:
+        return 0
+    return max(1, int(round(base * 0.8)))
+
+
+def trial_discounted_stars(duration_key: str) -> int:
+    from payments.tariff_gate import normalize_tariff_duration_key
+
+    key = normalize_tariff_duration_key(duration_key)
+    base = _TRIAL_DISCOUNT_STAR_BASE.get(key)
+    if base is None:
+        return 0
+    return max(1, int(round(base * 0.8)))
+
 
 dct_desc = {
     '7': '👌 7 дней — 99 руб',
@@ -640,6 +744,25 @@ _GIFT_TARIFF_MONTHS = {
     '365': 12,
     '730': 24,
 }
+
+
+def _wheel_discount_payments_word(count: int) -> str:
+    n = abs(int(count))
+    if n % 100 in (11, 12, 13, 14):
+        return "оплат"
+    rem = n % 10
+    if rem == 1:
+        return "оплата"
+    if rem in (2, 3, 4):
+        return "оплаты"
+    return "оплат"
+
+
+def format_wheel_discount_balances(d10: int, d30: int, d50: int) -> str:
+    lines = ["Доступны скидки:"]
+    for pct, count in ((10, d10), (30, d30), (50, d50)):
+        lines.append(f"−{pct}% — {count} {_wheel_discount_payments_word(count)}")
+    return "\n".join(lines)
 
 
 def resolve_gift_price(duration_key: str, *, repeat_giver: bool) -> int:

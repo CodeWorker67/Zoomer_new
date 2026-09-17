@@ -23,6 +23,7 @@ from sheduler.check_fk import check_fk
 from sheduler.check_wl_traffic import check_wl_traffic_cron
 from sheduler.accumulate_wl_traffic import accumulate_wl_traffic_cron
 from sheduler.credit_forever_wl_monthly import credit_forever_wl_monthly_cron
+from sheduler.wheel_fake_recent_win import wheel_fake_recent_win_job
 from handlers import (
     handlers_user,
     handlers_statistic,
@@ -36,6 +37,7 @@ from handlers import (
     handlers_patner,
     handlers_wl_traffic,
     handlers_wheel,
+    handlers_wheel_discount,
 )
 from sheduler.time_mes import send_message_cron
 from logging_config import logger
@@ -73,6 +75,7 @@ async def main() -> None:
     dp.include_router(handlers_admin.router)
     dp.include_router(handlers_import.router)
     dp.include_router(handlers_devices.router)
+    dp.include_router(handlers_wheel_discount.router)
     dp.include_router(handlers_user.router)
     dp.include_router(handlers_wl_traffic.router)
     dp.include_router(handlers_export.router)
@@ -130,6 +133,14 @@ async def main() -> None:
         args=[bot],
         id='pg_dump_backup',
         misfire_grace_time=180,
+        max_instances=1,
+    )
+    scheduler.add_job(
+        wheel_fake_recent_win_job,
+        trigger='interval',
+        minutes=127,
+        id='wheel_fake_recent_win',
+        misfire_grace_time=600,
         max_instances=1,
     )
     scheduler.start()

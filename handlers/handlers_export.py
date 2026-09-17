@@ -20,6 +20,7 @@ from config_bd.models import (
     LinkingCodes,
     PasswordResetCodes,
     PartnerBotApplications,
+    WheelFortuna,
 )
 from config_bd.utils import (
     _billing_duration_from_amount_fallback,
@@ -192,6 +193,7 @@ async def _export_database_to_excel_impl(
             linking_codes_list = snapshot["linking_codes"]
             password_reset_codes_list = snapshot["password_reset_codes"]
             partner_bot_applications_list = snapshot["partner_bot_applications"]
+            wheel_fortuna_list = snapshot["wheel_fortuna"]
             gifts_list = snapshot["gifts"]
             online_list = snapshot["online"]
             white_counter_list = snapshot["white_counter"]
@@ -599,6 +601,14 @@ async def _export_database_to_excel_impl(
                     title="partner_bot_applications",
                     rows=partner_bot_applications_list,
                     columns=_model_column_names(PartnerBotApplications),
+                    header_alignment=header_alignment,
+                    thin_border=thin_border,
+                ),
+                _write_orm_sheet(
+                    wb,
+                    title="wheel_fortuna",
+                    rows=wheel_fortuna_list,
+                    columns=_model_column_names(WheelFortuna),
                     header_alignment=header_alignment,
                     thin_border=thin_border,
                 ),

@@ -19,6 +19,7 @@ from config import (
 from keyboard import keyboard_payment_sbp, create_kb
 from lexicon import dct_desc, dct_price, lexicon
 from payments.gift_pricing import gift_rub_amount_and_desc, regular_rub_amount
+from payments.wheel_checkout import apply_admin_test_price, quote_gift, quote_subscription
 from logging_config import logger
 from payments.payment_limits import payment_creation_allowed
 from payments.payload_source import BOT, SITE
@@ -293,6 +294,7 @@ async def pay_for_gift(
     telegram_username: Optional[str] = None,
     *,
     source: Optional[str] = None,
+    payload_suffix: str = "",
 ) -> Dict:
     """Создание подарочного платежа Platega."""
     if not await payment_creation_allowed(int(user_id), telegram_username):
@@ -306,6 +308,7 @@ async def pay_for_gift(
     payload = _build_payload(
         user_id, duration, white, True, method, amount_rub,
         source=source or BOT,
+        payload_suffix=payload_suffix,
     )
 
     platega = PlategaPayment(PLATEGA_API_KEY, PLATEGA_MERCHANT_ID)
@@ -512,14 +515,21 @@ async def _handle_platega_button_callback(callback: CallbackQuery, ui_kind: str)
         log_label = "Platega (кнопка карта)"
     duration, gift_flag = _duration_from_callback(data, prefix, gift_prefix)
     desc_key = duration
+    uid = callback.from_user.id
     if gift_flag:
-        rub_amount, gift_des = await gift_rub_amount_and_desc(sql, callback.from_user.id, desc_key)
+        quote = await quote_gift(uid, desc_key)
+        rub_amount = quote.final_rub
+        _, gift_des = await gift_rub_amount_and_desc(sql, uid, desc_key)
+        suffix = quote.payload_suffix
     else:
-        rub_amount = regular_rub_amount(duration)
+        quote = await quote_subscription(uid, desc_key)
+        rub_amount = quote.final_rub
         gift_des = dct_desc[desc_key]
-    if callback.from_user.id in ADMIN_IDS:
-        rub_amount = 1
-    user_id = str(callback.from_user.id)
+        suffix = quote.payload_suffix
+    quote = apply_admin_test_price(uid, quote)
+    rub_amount = quote.final_rub
+    suffix = quote.payload_suffix
+    user_id = str(uid)
     duration = normalize_tariff_duration_key(duration)
     tg_uname = callback.from_user.username
 
@@ -532,6 +542,7 @@ async def _handle_platega_button_callback(callback: CallbackQuery, ui_kind: str)
             white=False,
             payment_method=payment_method,
             telegram_username=tg_uname,
+            payload_suffix=suffix,
         )
     else:
         payment_info = await pay(
@@ -542,11 +553,12 @@ async def _handle_platega_button_callback(callback: CallbackQuery, ui_kind: str)
             white=False,
             payment_method=payment_method,
             telegram_username=tg_uname,
+            payload_suffix=suffix,
         )
 
     if payment_info["status"] == "pending":
         try:
-            text = lexicon["payment_link"].format(wl_bonus="")
+            text = lexicon["payment_link"].format(wl_bonus="", tariff_summary="")
             if gift_flag:
                 text += "\n\nДля оплаты <b>подарочной подписки</b> перейдите по ссылке:"
             else:
@@ -583,14 +595,17 @@ async def process_payment_card(callback: CallbackQuery):
         return
 
     desc_key = duration
+    uid = callback.from_user.id
     if gift_flag:
-        rub_amount, gift_des = await gift_rub_amount_and_desc(sql, callback.from_user.id, desc_key)
+        quote = await quote_gift(uid, desc_key)
+        _, gift_des = await gift_rub_amount_and_desc(sql, uid, desc_key)
     else:
-        rub_amount = regular_rub_amount(duration)
+        quote = await quote_subscription(uid, desc_key)
         gift_des = dct_desc[desc_key]
-    if callback.from_user.id in ADMIN_IDS:
-        rub_amount = 1
-    user_id = str(callback.from_user.id)
+    quote = apply_admin_test_price(uid, quote)
+    rub_amount = quote.final_rub
+    suffix = quote.payload_suffix
+    user_id = str(uid)
     duration = normalize_tariff_duration_key(duration)
     tg_uname = callback.from_user.username
 
@@ -603,6 +618,7 @@ async def process_payment_card(callback: CallbackQuery):
             white=False,
             payment_method=PLATEGA_CARD_METHOD,
             telegram_username=tg_uname,
+            payload_suffix=suffix,
         )
     else:
         payment_info = await pay(
@@ -613,11 +629,12 @@ async def process_payment_card(callback: CallbackQuery):
             white=False,
             payment_method=PLATEGA_CARD_METHOD,
             telegram_username=tg_uname,
+            payload_suffix=suffix,
         )
 
     if payment_info["status"] == "pending":
         try:
-            text = lexicon["payment_link"].format(wl_bonus="")
+            text = lexicon["payment_link"].format(wl_bonus="", tariff_summary="")
             if gift_flag:
                 text += "\n\nДля оплаты <b>подарочной подписки</b> перейдите по ссылке:"
             else:

@@ -13,6 +13,7 @@ from logging_config import logger
 from payments.pay_cryptobot import create_cryptobot_payment
 from payments.pay_platega import pay as pay_platega, PLATEGA_CARD_METHOD, PLATEGA_SBP_METHOD
 from payments.payload_source import BOT
+from payments.wheel_checkout import apply_admin_test_price, quote_traffic
 from wl_traffic.constants import WL_TRAFFIC_TARIFFS
 
 router = Router()
@@ -45,8 +46,11 @@ async def _pay_rub(callback: CallbackQuery, ui_kind: str) -> None:
     if gb not in WL_TRAFFIC_TARIFFS:
         return
 
-    user_id = str(callback.from_user.id)
-    price = _traffic_price(gb, callback.from_user.id)
+    uid = callback.from_user.id
+    user_id = str(uid)
+    quote = await quote_traffic(uid, gb)
+    quote = apply_admin_test_price(uid, quote)
+    price = quote.final_rub
     duration = _traffic_duration(gb)
 
     payment_info = await pay_platega(
@@ -56,6 +60,7 @@ async def _pay_rub(callback: CallbackQuery, ui_kind: str) -> None:
         duration=duration,
         white=False,
         payment_method=PLATEGA_CARD_METHOD if ui_kind == "card" else PLATEGA_SBP_METHOD,
+        payload_suffix=quote.payload_suffix,
     )
 
     btn = "⚡ Оплатить СБП" if ui_kind == "sbp" else "💳 Оплатить картой РФ"
@@ -85,12 +90,15 @@ async def wl_traffic_pay_stars(callback: CallbackQuery):
     if gb not in WL_TRAFFIC_TARIFFS:
         return
 
-    user_id = str(callback.from_user.id)
-    stars_amount = _traffic_price(gb, callback.from_user.id)
+    uid = callback.from_user.id
+    user_id = str(uid)
+    quote = await quote_traffic(uid, gb)
+    quote = apply_admin_test_price(uid, quote, stars=True)
+    stars_amount = quote.final_stars
     duration = _traffic_duration(gb)
     payload = (
         f"user_id:{user_id},duration:{duration},white:False,gift:False,"
-        f"method:stars,amount:{stars_amount},source:{BOT}"
+        f"method:stars,amount:{stars_amount},source:{BOT}{quote.payload_suffix}"
     )
 
     await bot.send_invoice(
@@ -113,7 +121,9 @@ async def wl_traffic_pay_crypto(callback: CallbackQuery):
         return
 
     user_id = callback.from_user.id
-    rub_amount = _traffic_price(gb, user_id)
+    quote = await quote_traffic(user_id, gb)
+    quote = apply_admin_test_price(user_id, quote)
+    rub_amount = quote.final_rub
     duration = _traffic_duration(gb)
 
     result = await create_cryptobot_payment(
@@ -124,6 +134,7 @@ async def wl_traffic_pay_crypto(callback: CallbackQuery):
         white=False,
         is_gift=False,
         payload_source=BOT,
+        payload_suffix=quote.payload_suffix,
     )
 
     if result["status"] == "pending":

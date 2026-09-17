@@ -1113,7 +1113,11 @@ async def sub_page_pay_stars(body: SubPagePayIn, request: Request, _: SubPageAut
     prices = [LabeledPrice(label="XTR", amount=stars_amount)]
     dur_label = "30" if duration_str == "30secret" else duration_str
     title = f"Оплата подписки на {dur_label} дней."
-    description = lexicon["payment_link_white"] if white else lexicon["payment_link"].format(wl_bonus="")
+    description = (
+        lexicon["payment_link_white"]
+        if white
+        else lexicon["payment_link"].format(wl_bonus="", tariff_summary="")
+    )
 
     try:
         await bot.send_invoice(
@@ -1755,5 +1759,7 @@ async def partner_export_application_settings(
 
 
 from landing_api import landing_router  # noqa: E402
+from wheel_api import router as wheel_router  # noqa: E402
 
 app.include_router(landing_router)
+app.include_router(wheel_router)

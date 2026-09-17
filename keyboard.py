@@ -230,7 +230,30 @@ def tariff_button_label(key: str, *, is_admin: bool = False) -> str:
     return f'{_USER_TARIFF_EMOJI[key]}{_TARIFF_LABELS[key]}'
 
 
-def _tariff_button_kwargs(*, is_admin: bool = False) -> dict[str, str]:
+def trial_discount_tariff_button_text(key: str, *, is_admin: bool = False) -> str:
+    import re
+    from lexicon import trial_discounted_rub
+
+    if key not in _TARIFF_LABELS:
+        return tariff_button_label(key, is_admin=is_admin)
+    price = trial_discounted_rub(key)
+    label = re.sub(
+        r' — \d+ руб.*',
+        f' — {price} руб (−20%)',
+        _TARIFF_LABELS[key],
+    )
+    if is_admin:
+        count = _ADMIN_TARIFF_COUNTS.get(key, '')
+        return f'{count}{label}'
+    return f'{_USER_TARIFF_EMOJI[key]}{label}'
+
+
+def _tariff_button_kwargs(*, is_admin: bool = False, trial_discount: bool = False) -> dict[str, str]:
+    if trial_discount:
+        return {
+            f'r_{key}': trial_discount_tariff_button_text(key, is_admin=is_admin)
+            for key in _TARIFF_LABELS
+        }
     return {
         f'r_{key}': tariff_button_label(key, is_admin=is_admin)
         for key in _TARIFF_LABELS
@@ -246,35 +269,38 @@ def _admin_tariff_button_icons() -> dict[str, str]:
     }
 
 
-def _tariff_kb(*, is_admin: bool = False, **extra: str) -> InlineKeyboardMarkup:
+def _tariff_kb(*, is_admin: bool = False, trial_discount: bool = False, **extra: str) -> InlineKeyboardMarkup:
     return create_kb(
         1,
         icons=_admin_tariff_button_icons() if is_admin else None,
-        **_tariff_button_kwargs(is_admin=is_admin),
+        **_tariff_button_kwargs(is_admin=is_admin, trial_discount=trial_discount),
         **extra,
     )
 
 
-def keyboard_tariff_bonus(*, is_admin: bool = False):
+def keyboard_tariff_bonus(*, is_admin: bool = False, trial_discount: bool = False):
     return _tariff_kb(
         is_admin=is_admin,
+        trial_discount=trial_discount,
         free_vpn='🔥ПОПРОБОВАТЬ 1 день БЕСПЛАТНО🔥',
         wl_traffic_buy_sub='📦 Купить трафик Антиглушилка',
         back_to_buy_menu='🔙 Назад',
     )
 
 
-def keyboard_tariff(*, is_admin: bool = False):
+def keyboard_tariff(*, is_admin: bool = False, trial_discount: bool = False):
     return _tariff_kb(
         is_admin=is_admin,
+        trial_discount=trial_discount,
         wl_traffic_buy_sub='📦 Купить трафик Антиглушилка',
         back_to_buy_menu='🔙 Назад',
     )
 
 
-def keyboard_tariff_trial(*, is_admin: bool = False):
+def keyboard_tariff_trial(*, is_admin: bool = False, trial_discount: bool = False):
     return _tariff_kb(
         is_admin=is_admin,
+        trial_discount=trial_discount,
         wl_traffic_buy_sub='📦 Купить трафик Антиглушилка',
         back_to_buy_menu='🔙 Назад',
     )
@@ -495,35 +521,43 @@ def keyboard_payment_cancel():
     return keyboard
 
 
-def keyboard_payment_method(tarif):
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(
-                text="⚡СБП",
-                callback_data=f"wata_sbp_{tarif}",
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                text="💳 Карта РФ",
-                callback_data=f"wata_card_{tarif}",
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                text="⭐️ Telegram Stars",
-                callback_data=f"stars_{tarif}",
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                text="💎 Crypto bot",
-                callback_data=f"crypto_{tarif}",
-            )
-        ],
-        [InlineKeyboardButton(text="🔙 Назад", callback_data='back_to_main')],
+def keyboard_wheel_discount(kind: str, product_key: str, counts) -> InlineKeyboardMarkup:
+    """kind: sub | gift | traffic"""
+    rows = []
+    for pct, n in ((10, counts.discount_10), (30, counts.discount_30), (50, counts.discount_50)):
+        if n > 0:
+            rows.append([
+                InlineKeyboardButton(
+                    text=f"🎡 −{pct}% (осталось {n})",
+                    callback_data=f"wd_p:{kind}:{product_key}:{pct}",
+                )
+            ])
+    rows.append([
+        InlineKeyboardButton(
+            text="Без скидки",
+            callback_data=f"wd_p:{kind}:{product_key}:0",
+        )
     ])
-    return keyboard
+    if kind == "traffic":
+        back_cb = "wl_traffic_buy"
+    elif kind == "gift":
+        back_cb = "buy_gift"
+    else:
+        back_cb = "buy_vpn"
+    rows.append([InlineKeyboardButton(text="🔙 Назад", callback_data=back_cb)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def keyboard_payment_method(tarif, *, hide_back: bool = False):
+    rows = [
+        [InlineKeyboardButton(text="⚡СБП", callback_data=f"wata_sbp_{tarif}")],
+        [InlineKeyboardButton(text="💳 Карта РФ", callback_data=f"wata_card_{tarif}")],
+        [InlineKeyboardButton(text="⭐️ Telegram Stars", callback_data=f"stars_{tarif}")],
+        [InlineKeyboardButton(text="💎 Crypto bot", callback_data=f"crypto_{tarif}")],
+    ]
+    if not hide_back:
+        rows.append([InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def keyboard_payment_method_stock(tarif):
@@ -817,24 +851,17 @@ def keyboard_wl_traffic_tariffs(*, back_callback: str = "back_to_main") -> Inlin
 
 
 def keyboard_wl_traffic_payment_method(
-    mb: str, *, back_callback: str = "wl_traffic_buy"
+    mb: str,
+    *,
+    back_callback: str = "wl_traffic_buy",
+    hide_back: bool = False,
 ) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text="⚡СБП",
-            callback_data=f"wl_traffic_sbp_{mb}",
-        )],
-        [InlineKeyboardButton(
-            text="💳 Карта РФ",
-            callback_data=f"wl_traffic_card_{mb}",
-        )],
-        [InlineKeyboardButton(
-            text="⭐️ Telegram Stars",
-            callback_data=f"wl_traffic_stars_{mb}",
-        )],
-        [InlineKeyboardButton(
-            text="💎 Crypto bot",
-            callback_data=f"wl_traffic_crypto_{mb}",
-        )],
-        [InlineKeyboardButton(text=BTN_BACK, callback_data=back_callback)],
-    ])
+    rows = [
+        [InlineKeyboardButton(text="⚡СБП", callback_data=f"wl_traffic_sbp_{mb}")],
+        [InlineKeyboardButton(text="💳 Карта РФ", callback_data=f"wl_traffic_card_{mb}")],
+        [InlineKeyboardButton(text="⭐️ Telegram Stars", callback_data=f"wl_traffic_stars_{mb}")],
+        [InlineKeyboardButton(text="💎 Crypto bot", callback_data=f"wl_traffic_crypto_{mb}")],
+    ]
+    if not hide_back:
+        rows.append([InlineKeyboardButton(text=BTN_BACK, callback_data=back_callback)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)

@@ -8,9 +8,9 @@ from bot import sql
 from keyboard import (
     BTN_BACK,
     create_kb,
-    keyboard_wl_traffic_payment_method,
     keyboard_wl_traffic_tariffs,
 )
+from handlers.handlers_wheel_discount import show_tariff_with_optional_discount
 from lexicon import lexicon
 from utils.menu_ui import edit_or_send_photo, show_connect_screen
 from wl_traffic.constants import (
@@ -19,6 +19,7 @@ from wl_traffic.constants import (
     WL_TRAFFIC_BUY_SUB_CB,
     WL_TRAFFIC_TARIFFS,
 )
+from services.wheel_discount import KIND_TRAFFIC
 
 router = Router()
 
@@ -60,11 +61,10 @@ async def wl_traffic_tariff_cb(callback: CallbackQuery):
     if gb not in WL_TRAFFIC_TARIFFS:
         return
 
-    price = WL_TRAFFIC_TARIFFS[gb]
-    back_cb = WL_TRAFFIC_BUY_SUB_CB if from_sub else WL_TRAFFIC_BUY_CB
-    await edit_or_send_photo(
+    await show_tariff_with_optional_discount(
         callback,
-        "buy_traffic",
-        lexicon["wl_traffic_payment_intro"].format(gb=gb, price=price),
-        keyboard_wl_traffic_payment_method(gb, back_callback=back_cb),
+        kind=KIND_TRAFFIC,
+        product_key=gb,
+        intro_text="",
+        photo="buy_traffic",
     )

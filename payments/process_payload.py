@@ -20,6 +20,13 @@ from wl_traffic.service import (
     user_on_limited_squad,
 )
 from wl_traffic.texts import format_wl_checker_traffic_purchase
+from services.wheel import grant_purchase_wheel_attempts, sync_partner_wheel_attempts
+from services.wheel_discount import (
+    commit_payload_discount,
+    payer_id_from_payload_parts,
+    validate_payload_discount,
+)
+from utils.trial_discount import validate_payload_trial_discount
 
 
 async def _mark_connect_panel(transaction_id: Optional[str], is_card: bool) -> None:
@@ -235,6 +242,20 @@ async def process_confirmed_payment(
             else:
                 payload_parts[item] = "1"
         raw_uid = payload_parts.get("user_id", "0")
+        payer_uid = payer_id_from_payload_parts(payload_parts)
+        if payer_uid is not None:
+            if not await validate_payload_discount(
+                payer_uid,
+                payload_parts,
+                payload=payload,
+                transaction_id=transaction_id,
+            ):
+                logger.error("Wheel discount: отклонён платёж uid={} (валидация)", payer_uid)
+                return False
+            if not await validate_payload_trial_discount(payer_uid, payload_parts):
+                logger.error("Trial discount: отклонён платёж uid={} (валидация)", payer_uid)
+                return False
+
         raw_duration = str(payload_parts.get("duration", "0") or "0").strip()
         traffic_gb = parse_traffic_duration(raw_duration)
         if traffic_gb is not None:
@@ -252,7 +273,7 @@ async def process_confirmed_payment(
             uid_traffic = int(raw_uid)
             if method == "stars":
                 await sql.add_payment_stars(uid_traffic, amount, payload, False)
-            return await _process_traffic_topup(
+            ok_traffic = await _process_traffic_topup(
                 uid_traffic,
                 traffic_gb,
                 method,
@@ -260,6 +281,19 @@ async def process_confirmed_payment(
                 transaction_id=transaction_id,
                 is_card=is_card,
             )
+            if ok_traffic and payer_uid is not None:
+                if not await commit_payload_discount(
+                    payer_uid,
+                    payload,
+                    payload_parts,
+                    transaction_id=transaction_id,
+                ):
+                    logger.error(
+                        "Wheel discount: не списана скидка после трафика uid={}",
+                        payer_uid,
+                    )
+                    return False
+            return ok_traffic
 
         duration = _payload_duration_to_panel_days(raw_duration)
         secret_tariff = raw_duration == "30secret"
@@ -356,6 +390,18 @@ async def process_confirmed_payment(
             else:
                 logger.info("Подарок (сайт): уведомление в Telegram пропущено, giver_id={}", giver_billing_id)
 
+            if payer_uid is not None:
+                if not await commit_payload_discount(
+                    payer_uid,
+                    payload,
+                    payload_parts,
+                    transaction_id=transaction_id,
+                ):
+                    logger.error(
+                        "Wheel discount: не списана скидка после подарка uid={}",
+                        payer_uid,
+                    )
+                    return False
             return True
 
         else:
@@ -395,9 +441,17 @@ async def process_confirmed_payment(
                 except ValueError as e:
                     logger.error("❌ Ошибка парсинга даты: {}", e)
 
+            payer_had_paid_before = False
+            payer_partner_id: Optional[int] = None
             try:
                 user_data = await sql.get_user(db_uid)
                 if user_data and len(user_data) > 4:
+                    payer_had_paid_before = bool(user_data[8])
+                    if len(user_data) > 23 and user_data[23]:
+                        try:
+                            payer_partner_id = int(str(user_data[23]).strip())
+                        except (TypeError, ValueError):
+                            payer_partner_id = None
                     ref_reserve_field = user_data[8]
                     ref_id_str = user_data[2]
 
@@ -455,6 +509,15 @@ async def process_confirmed_payment(
                 await sql.add_user(db_uid, True)
             await sql.update_reserve_field(db_uid)
 
+            await grant_purchase_wheel_attempts(db_uid, duration)
+            if (
+                not payer_had_paid_before
+                and payer_partner_id is not None
+                and payer_partner_id > 0
+                and payer_partner_id != db_uid
+            ):
+                await sync_partner_wheel_attempts(payer_partner_id)
+
             if not white_flag:
                 bonus_gb = subscription_bonus_gb(duration)
                 if bonus_gb > 0:
@@ -494,6 +557,18 @@ async def process_confirmed_payment(
             else:
                 logger.info("Платёж сайта: Telegram-уведомление не отправлялось (db_uid={})", db_uid)
 
+            if payer_uid is not None:
+                if not await commit_payload_discount(
+                    payer_uid,
+                    payload,
+                    payload_parts,
+                    transaction_id=transaction_id,
+                ):
+                    logger.error(
+                        "Wheel discount: не списана скидка после подписки uid={}",
+                        payer_uid,
+                    )
+                    return False
             return True
 
     except Exception as e:

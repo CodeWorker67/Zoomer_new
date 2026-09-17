@@ -426,7 +426,7 @@ async def process_payment_wata_sbp(callback: CallbackQuery):
 
     if payment_info["status"] == "pending":
         try:
-            text = lexicon["payment_link"].format(wl_bonus="")
+            text = lexicon["payment_link"].format(wl_bonus="", tariff_summary="")
             if gift_flag:
                 text += "\n\nДля оплаты <b>подарочной подписки</b> перейдите по ссылке:"
             else:
@@ -490,7 +490,7 @@ async def process_payment_wata_card(callback: CallbackQuery):
 
     if payment_info["status"] == "pending":
         try:
-            text = lexicon["payment_link"].format(wl_bonus="")
+            text = lexicon["payment_link"].format(wl_bonus="", tariff_summary="")
             if gift_flag:
                 text += "\n\nДля оплаты <b>подарочной подписки</b> перейдите по ссылке:"
             else:

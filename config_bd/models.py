@@ -261,6 +261,88 @@ class PasswordResetCodes(Base):
     expires_at = Column(DateTime, nullable=False)
 
 
+class WheelDiscountCheckout(Base):
+    """Активированная скидка (счётчик уже списан) — ждёт оплаты выбранного тарифа."""
+
+    __tablename__ = "wheel_discount_checkout"
+
+    user_id = Column(BigInteger, primary_key=True)
+    kind = Column(String(16), nullable=False)
+    product_key = Column(String(32), nullable=False)
+    percent = Column(Integer, nullable=False)
+    base_rub = Column(Integer, nullable=False)
+    final_rub = Column(Integer, nullable=False)
+    base_stars = Column(Integer, nullable=False, default=0)
+    final_stars = Column(Integer, nullable=False, default=0)
+    expires_at = Column(DateTime, nullable=False)
+    activated_at = Column(DateTime, default=datetime.now, nullable=False)
+
+
+class WheelDiscountReservation(Base):
+    __tablename__ = "wheel_discount_reservations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    token = Column(String(32), unique=True, nullable=False)
+    user_id = Column(BigInteger, nullable=False)
+    percent = Column(Integer, nullable=False)
+    kind = Column(String(16), nullable=False)
+    product_key = Column(String(32), nullable=False)
+    base_rub = Column(Integer, nullable=False)
+    final_rub = Column(Integer, nullable=False)
+    base_stars = Column(Integer, nullable=False, default=0)
+    final_stars = Column(Integer, nullable=False, default=0)
+    status = Column(String(16), nullable=False, default="pending")
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+    consumed_at = Column(DateTime, nullable=True)
+    payment_ref = Column(String(128), nullable=True)
+
+
+class WheelDiscountRedemption(Base):
+    __tablename__ = "wheel_discount_redemptions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    reservation_id = Column(Integer, ForeignKey("wheel_discount_reservations.id"), nullable=True)
+    user_id = Column(BigInteger, nullable=False)
+    percent = Column(Integer, nullable=False)
+    kind = Column(String(16), nullable=False)
+    product_key = Column(String(32), nullable=False)
+    payment_ref = Column(String(128), unique=True, nullable=False)
+    payload = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+
+
+class WheelFakeRecentWin(Base):
+    """Постоянные «социальные» записи для ленты последних выигрышей колеса."""
+
+    __tablename__ = 'wheel_fake_recent_wins'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    prize_id = Column(String(64), nullable=False)
+    name_initial = Column(String(8), nullable=False)
+    mask_stars = Column(Integer, nullable=False, default=4)
+    won_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+
+
+class WheelFortuna(Base):
+    __tablename__ = 'wheel_fortuna'
+
+    user_id = Column(BigInteger, primary_key=True)
+    attempt = Column(Integer, default=0, nullable=False)
+    rotation_number = Column(Integer, default=0, nullable=False)
+    discount_10 = Column(Integer, default=0, nullable=False)
+    discount_30 = Column(Integer, default=0, nullable=False)
+    discount_50 = Column(Integer, default=0, nullable=False)
+    partner_wheel_batches_credited = Column(Integer, default=0, nullable=False)
+    history = Column(Text, nullable=True)
+    pending_prize_id = Column(String(64), nullable=True)
+    pending_since = Column(DateTime, nullable=True)
+    username = Column(String(255), nullable=True)
+    full_name = Column(String(512), nullable=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
 class PartnerBotApplications(Base):
     __tablename__ = 'partner_bot_applications'
 

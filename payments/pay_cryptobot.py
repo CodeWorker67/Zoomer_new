@@ -13,6 +13,7 @@ from logging_config import logger
 from payments.payment_limits import payment_creation_allowed
 from payments.payload_source import BOT
 from payments.tariff_gate import is_mobile_tariff_key, normalize_tariff_duration_key
+from payments.wheel_checkout import apply_admin_test_price, quote_gift, quote_subscription
 
 router: Router = Router()
 
@@ -166,13 +167,14 @@ async def process_payment_crypto(callback: CallbackQuery):
     duration = normalize_tariff_duration_key(duration_key)
 
     if gift_flag:
-        rub_amount, description = await gift_rub_amount_and_desc(sql, user_id, desc_key)
+        quote = await quote_gift(user_id, desc_key)
+        _, description = await gift_rub_amount_and_desc(sql, user_id, desc_key)
     else:
-        rub_amount = regular_rub_amount(duration_key)
+        quote = await quote_subscription(user_id, desc_key)
         description = dct_desc[desc_key]
 
-    if callback.from_user.id in ADMIN_IDS:
-        rub_amount = 1
+    quote = apply_admin_test_price(user_id, quote)
+    rub_amount = quote.final_rub
 
     result = await create_cryptobot_payment(
         rub_amount=rub_amount,
@@ -183,10 +185,11 @@ async def process_payment_crypto(callback: CallbackQuery):
         is_gift=gift_flag,
         telegram_username=callback.from_user.username,
         payload_source=BOT,
+        payload_suffix=quote.payload_suffix,
     )
 
     if result['status'] == 'pending':
-        text = lexicon['payment_link'].format(wl_bonus="")
+        text = lexicon['payment_link'].format(wl_bonus="", tariff_summary="")
         if gift_flag:
             text += '\n\nДля оплаты <b>подарочной подписки</b> перейдите по ссылке:'
         else:

@@ -9,6 +9,7 @@ from aiogram.types import CallbackQuery, LabeledPrice, PreCheckoutQuery, Message
 from lexicon import lexicon
 from payments.gift_pricing import gift_rub_amount_and_desc
 from payments.payload_source import BOT
+from payments.wheel_checkout import apply_admin_test_price, quote_gift, quote_subscription
 from payments.process_payload import process_confirmed_payment
 from payments.tariff_gate import is_mobile_tariff_key, normalize_tariff_duration_key
 
@@ -47,19 +48,21 @@ async def process_payment_stars(callback: CallbackQuery):
         await callback.answer(lexicon['mobile_purchase_disabled'], show_alert=True)
         return
 
+    uid = callback.from_user.id
+    desc_key = duration
     if gift_flag:
-        stars_amount, _ = await gift_rub_amount_and_desc(sql, callback.from_user.id, duration)
+        quote = await quote_gift(uid, desc_key)
     else:
-        stars_amount = get_stars_amount('Stars', duration)
-    if callback.from_user.id in ADMIN_IDS:
-        stars_amount = 1
-    user_id = str(callback.from_user.id)
+        quote = await quote_subscription(uid, desc_key)
+    quote = apply_admin_test_price(uid, quote, stars=True)
+    stars_amount = quote.final_stars
+    user_id = str(uid)
 
     duration = normalize_tariff_duration_key(duration)
 
     payload = (
         f"user_id:{user_id},duration:{duration},white:False,gift:{gift_flag},"
-        f"method:stars,amount:{stars_amount},source:{BOT}"
+        f"method:stars,amount:{stars_amount},source:{BOT}{quote.payload_suffix}"
     )
 
     prices = [LabeledPrice(label="XTR", amount=stars_amount)]
@@ -70,7 +73,7 @@ async def process_payment_stars(callback: CallbackQuery):
         title = f"Оплата подписки {'в подарок другу ' if gift_flag else ''}на 2 года."
     else:
         title = f"Оплата подписки {'в подарок другу ' if gift_flag else ''}на {dur_label} дней."
-    description = lexicon['payment_link'].format(wl_bonus="")
+    description = lexicon['payment_link'].format(wl_bonus="", tariff_summary="")
 
     await callback.answer()
     try:

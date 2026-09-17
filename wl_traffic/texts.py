@@ -10,15 +10,25 @@ from wl_traffic.service import (
 )
 
 
-def format_pro_payment_link(duration_days: int) -> str:
+def format_subscription_wl_bonus_line(duration_days: int) -> str:
     bonus = subscription_bonus_gb(duration_days)
-    wl_bonus = ""
-    if bonus > 0:
-        if is_forever_duration(duration_days):
-            wl_bonus = lexicon["wl_bonus_line_forever"].format(gb=bonus)
-        else:
-            wl_bonus = lexicon["wl_bonus_line"].format(gb=bonus)
-    return lexicon["payment_link"].format(wl_bonus=wl_bonus)
+    if bonus <= 0:
+        return ""
+    if is_forever_duration(duration_days):
+        raw = lexicon["wl_bonus_line_forever"].format(gb=bonus)
+    else:
+        raw = lexicon["wl_bonus_line"].format(gb=bonus)
+    return raw.lstrip("\n")
+
+
+def format_pro_payment_link(duration_days: int, *, tariff_summary: str = "") -> str:
+    wl_bonus = format_subscription_wl_bonus_line(duration_days)
+    if wl_bonus:
+        wl_bonus = "\n" + wl_bonus
+    return lexicon["payment_link"].format(
+        wl_bonus=wl_bonus,
+        tariff_summary=tariff_summary,
+    )
 
 
 def format_wl_limit_exceeded(

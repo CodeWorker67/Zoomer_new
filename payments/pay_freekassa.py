@@ -394,7 +394,7 @@ async def _handle_wata_style_callback(callback: CallbackQuery, ui_kind: UiKind) 
 
     if payment_info["status"] == "pending":
         try:
-            text = lexicon["payment_link"].format(wl_bonus="")
+            text = lexicon["payment_link"].format(wl_bonus="", tariff_summary="")
             if gift_flag:
                 text += "\n\nДля оплаты <b>подарочной подписки</b> перейдите по ссылке:"
             else:

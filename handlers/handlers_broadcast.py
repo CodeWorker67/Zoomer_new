@@ -64,6 +64,7 @@ CATEGORY_LABELS = {
     "subscribe_none_or_expired_10d": "Подписки нет или подписка закончилась 10 дней назад",
     "all_users": "все пользователи",
     "made_gifts": "Делали подарки",
+    "trial_no_active_sub": "Взяли триал, нет активной подписки",
 }
 
 SCOPE_LABEL = {

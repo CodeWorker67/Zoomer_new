@@ -48,14 +48,21 @@ from aiogram.types import (
     InlineKeyboardButton,
 )
 from aiogram.filters import BaseFilter, ChatMemberUpdatedFilter, KICKED, MEMBER, Command
-from lexicon import buy_caption, lexicon
+from handlers.handlers_wheel_discount import show_tariff_with_optional_discount
+from lexicon import TRIAL_DISCOUNT_BANNER, buy_caption, lexicon
+from utils.trial_discount import is_user_eligible_for_trial_discount
 from wl_traffic.service import (
     credit_wl_subscription_bonus,
     fetch_panel_user,
     reassign_to_active_squad,
     user_on_limited_squad,
 )
-from wl_traffic.texts import format_pro_payment_link
+from services.wheel_discount import (
+    KIND_GIFT,
+    KIND_SUB,
+    build_pro_checkout_intro,
+    format_wheel_discount_tariff_inline,
+)
 
 
 router: Router = Router()
@@ -119,14 +126,6 @@ async def _panel_regular_subscription_is_active(uid: int) -> bool:
     expire_at = datetime.fromisoformat(expire_at_str.replace("Z", "+00:00"))
     now = datetime.now(timezone.utc)
     return user.get("status") == "ACTIVE" and expire_at > now
-
-_SECRET_TARIFF_PAYMENT_TEXT = (
-    "Секретный тариф - 💫 подписка на VPN PRO\n"
-    "4 сервера из разных стран на выбор.\n"
-    "5 устройств, безлимитный трафик.\n\n"
-    "СКИДКА 40% - 149 руб за месяц\n\n"
-    "Выберите способ оплаты:"
-)
 
 _R120_PAYMENT_TEXT = (
     "🎁 Акция: 3 + 1 месяц в подарок!\n"
@@ -364,15 +363,20 @@ async def buy_vpn_self_cb(callback: CallbackQuery):
     result_active = await x3.activ(str(callback.from_user.id))
     is_admin = callback.from_user.id in ADMIN_IDS
 
+    trial_discount = await is_user_eligible_for_trial_discount(sql, callback.from_user.id)
     if result_active['activ'] == '🔎 - Не подключён' and not in_panel:
-        kb = keyboard_tariff_bonus(is_admin=is_admin)
+        kb = keyboard_tariff_bonus(is_admin=is_admin, trial_discount=trial_discount)
     else:
-        kb = keyboard_tariff(is_admin=is_admin)
+        kb = keyboard_tariff(is_admin=is_admin, trial_discount=trial_discount)
+
+    caption = buy_caption(is_admin=is_admin)
+    if trial_discount:
+        caption = f"{TRIAL_DISCOUNT_BANNER}\n\n{caption}"
 
     await edit_or_send_photo(
         callback,
         "buy_subscription",
-        buy_caption(is_admin=is_admin),
+        caption,
         kb,
     )
 
@@ -397,11 +401,15 @@ async def secret_tariff_payment(callback: CallbackQuery):
         )
         return
     await callback.answer()
-    await edit_or_send_photo(
+    tariff_summary = await format_wheel_discount_tariff_inline(uid, KIND_SUB, "30secret")
+    await show_tariff_with_optional_discount(
         callback,
-        "buy_subscription",
-        _SECRET_TARIFF_PAYMENT_TEXT,
-        keyboard_payment_method("r_30secret"),
+        kind=KIND_SUB,
+        product_key="30secret",
+        intro_text=lexicon["secret_tariff_checkout_intro"].format(
+            tariff_summary=tariff_summary,
+        ),
+        photo="buy_subscription",
     )
 
 
@@ -435,14 +443,15 @@ async def secret_tariff_payment(callback: CallbackQuery):
 async def process_payment_method(callback: CallbackQuery):
     await callback.answer()
     tariff = callback.data
-    duration = int(tariff.replace('r_', ''))
-    text = format_pro_payment_link(duration)
-    text += '\n\nВыберите способ оплаты:'
-    await edit_or_send_photo(
+    product_key = tariff.replace('r_', '')
+    uid = callback.from_user.id
+    intro = await build_pro_checkout_intro(uid, KIND_SUB, product_key)
+    await show_tariff_with_optional_discount(
         callback,
-        "buy_subscription",
-        text,
-        keyboard_payment_method(tariff),
+        kind=KIND_SUB,
+        product_key=product_key,
+        intro_text=intro,
+        photo="buy_subscription",
     )
 
 
@@ -458,8 +467,13 @@ async def free_vpn_cb(callback: CallbackQuery):
         await _show_main_menu(callback)
         return
 
+    if user_data is None:
+        await sql.add_user(uid, False)
+    await sql.update_field_bool_3(uid, True)
+
     ok = await x3.addClient(day, str(uid), uid)
     if not ok:
+        await sql.update_field_bool_3(uid, False)
         synced = await sync_panel_user_to_db(uid)
         if not synced:
             await callback.answer(
@@ -505,6 +519,8 @@ async def free_vpn_cb(callback: CallbackQuery):
 async def _issue_broadcast_trial(callback: CallbackQuery) -> bool:
     uid = callback.from_user.id
     days = _BROADCAST_TRIAL_DAYS
+
+    await sql.update_field_bool_3(uid, True)
 
     user_id_str = str(uid)
     existing_user = await x3.get_user_by_username(user_id_str)
@@ -727,14 +743,15 @@ async def process_gift_payment_method(callback: CallbackQuery):
         return
     await callback.answer()
     tariff = callback.data
-    duration = int(tariff.replace('gift_r_', ''))
-    text = format_pro_payment_link(duration)
-    text += '\n\nВыберите способ оплаты <b>подарочной подписки</b>:'
-    await edit_or_send_photo(
+    product_key = tariff.replace('gift_r_', '')
+    uid = callback.from_user.id
+    intro = await build_pro_checkout_intro(uid, KIND_GIFT, product_key)
+    await show_tariff_with_optional_discount(
         callback,
-        "buy_subscription",
-        text,
-        keyboard_payment_method(tariff),
+        kind=KIND_GIFT,
+        product_key=product_key,
+        intro_text=intro,
+        photo="buy_subscription",
     )
 
 

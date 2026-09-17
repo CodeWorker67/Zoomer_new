@@ -10,6 +10,8 @@ router = Router()
 
 @router.message(Command("wheel"))
 async def cmd_wheel(message: Message) -> None:
+    if message.from_user.id not in ADMIN_IDS:
+        return
     url = (WHEEL_MINIAPP_URL or "").strip()
     if not url:
         await message.answer(

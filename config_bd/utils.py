@@ -508,6 +508,94 @@ class AsyncSQL:
                 return None
             return int(row)
 
+    async def get_user_ids_paid_raffle_tariffs_in_range(
+        self,
+        start_utc: datetime,
+        end_utc: datetime,
+    ) -> List[int]:
+        """
+        Уникальные user_id с успешными оплатами (confirmed/paid) подписки или подарка
+        на 30/90/180/365/730/5000 дней в интервале [start_utc, end_utc).
+        """
+        start_utc = _naive_utc(start_utc)
+        end_utc = _naive_utc(end_utc)
+        raffle_days = {30, 90, 180, 365, 730, 5000}
+
+        def _parse_map(payload: Optional[str]) -> dict[str, str]:
+            if not payload:
+                return {}
+            out: dict[str, str] = {}
+            for part in payload.split(","):
+                if ":" not in part:
+                    continue
+                k, _, v = part.partition(":")
+                out[k.strip()] = v.strip()
+            return out
+
+        def _duration_days(payload: Optional[str], amount: Any) -> Optional[int]:
+            m = _parse_map(payload)
+            raw = m.get("duration")
+            if _parse_traffic_duration(raw) is not None:
+                return None
+            d = _payload_duration_to_panel_days(raw)
+            if d is None:
+                try:
+                    amt_f = float(amount)
+                except (TypeError, ValueError):
+                    amt_f = None
+                if amt_f is not None:
+                    if m.get("white", "False").lower() == "true":
+                        d = _white_days_from_amount_fallback(amt_f)
+                    else:
+                        d = _billing_duration_from_amount_fallback(amt_f)
+            return d if d in raffle_days else None
+
+        models = (
+            Payments,
+            PaymentsCards,
+            PaymentsPlategaCrypto,
+            PaymentsStars,
+            PaymentsCryptobot,
+            PaymentsWataSBP,
+            PaymentsWataCard,
+            PaymentsFkSBP,
+        )
+        found: set[int] = set()
+        async with self.session_factory() as session:
+            for model in models:
+                stmt = select(
+                    model.user_id, model.amount, model.payload
+                ).where(
+                    model.status.in_(_BILLING_OK_STATUSES),
+                    model.time_created >= start_utc,
+                    model.time_created < end_utc,
+                )
+                for uid, amt, pl in (await session.execute(stmt)).all():
+                    if uid is None:
+                        continue
+                    if _duration_days(pl, amt) is not None:
+                        found.add(int(uid))
+        return sorted(found)
+
+    async def add_tickets_to_users(self, user_ids: List[int], amount: int) -> int:
+        if not user_ids or amount == 0:
+            return 0
+        updated = 0
+        async with self.session_factory() as session:
+            for i in range(0, len(user_ids), _STAT_IN_CHUNK):
+                chunk = user_ids[i : i + _STAT_IN_CHUNK]
+                stmt = (
+                    update(Users)
+                    .where(Users.user_id.in_(chunk))
+                    .values(
+                        tickets=func.coalesce(Users.tickets, 0) + int(amount)
+                    )
+                )
+                result = await session.execute(stmt)
+                updated += int(result.rowcount or 0)
+            await session.commit()
+        return updated
+
     async def next_negative_user_id(self) -> int:
         """
         Следующий отрицательный user_id для first_site / gift.

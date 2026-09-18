@@ -267,6 +267,45 @@ async def add_tickets_cmd(message: Message):
         await notify_purchase_tickets(user_id, amount)
 
 
+@router.message(Command(commands=['add_ticket_all']))
+async def add_ticket_all_cmd(message: Message):
+    """+1 билет всем, у кого в сентябре (МСК) была успешная оплата подписки/подарка 1/3/6/12/24 мес или Навсегда."""
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    now_msk = datetime.now(_MSK)
+    start_msk = datetime(now_msk.year, 9, 1, tzinfo=_MSK)
+    end_msk = datetime(now_msk.year, 10, 1, tzinfo=_MSK)
+    start_utc = start_msk.astimezone(timezone.utc).replace(tzinfo=None)
+    end_utc = end_msk.astimezone(timezone.utc).replace(tzinfo=None)
+
+    await message.answer(
+        f"⏳ Ищу успешные оплаты за сентябрь {now_msk.year} (1/3/6/12/24 мес и Навсегда, подписка или подарок)…"
+    )
+    try:
+        user_ids = await sql.get_user_ids_paid_raffle_tariffs_in_range(start_utc, end_utc)
+        updated = await sql.add_tickets_to_users(user_ids, 1)
+    except Exception as e:
+        logger.exception("/add_ticket_all failed")
+        await message.answer(f"❌ Ошибка: {e}")
+        return
+
+    await message.answer(
+        f"✅ <b>Готово (/add_ticket_all)</b>\n\n"
+        f"• Сентябрь {now_msk.year} (МСК), тарифы 30/90/180/365/730/5000 дней\n"
+        f"• Найдено плательщиков: <b>{len(user_ids)}</b>\n"
+        f"• Начислено +1 билет: <b>{updated}</b> пользователей",
+        parse_mode="HTML",
+    )
+    logger.info(
+        "Админ {}: /add_ticket_all year={} found={} updated={}",
+        message.from_user.id,
+        now_msk.year,
+        len(user_ids),
+        updated,
+    )
+
+
 @router.message(Command(commands=['gift']))
 async def gift_info_command(message: Message):
     """Информация о подарке по gift_id."""

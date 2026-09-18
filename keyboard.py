@@ -67,7 +67,7 @@ RAFFLE_CB = "raffle"
 RAFFLE_PARTICIPATE_CB = "raffle_participate"
 RAFFLE_TOP_CB = "raffle_top"
 RAFFLE_BACK_CB = "raffle_back"
-RAFFLE_RULES_URL = "https://telegra.ph/Usloviya-rozygrysha-Zumerskij-darit-09-17"
+RAFFLE_RULES_URL = "https://telegra.ph/Usloviya-rozygrysha-Zumerskij-darit-09-17-2"
 RAFFLE_BUTTON_EMOJI_ID = "6071303599973995501"
 
 

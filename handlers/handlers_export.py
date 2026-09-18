@@ -85,6 +85,29 @@ _USERS_EXPORT_COLUMNS_DEFAULT = (
     "field_bool_3",
 )
 
+# Лист users в /export (не все колонки модели)
+_USERS_EXPORT_ADMIN_COLUMNS = (
+    "user_id",
+    "username",
+    "ref",
+    "is_delete",
+    "in_panel",
+    "is_connect",
+    "create_user",
+    "reserve_field",
+    "subscription_end_date",
+    "last_broadcast_date",
+    "stamp",
+    "subscribtion",
+    "field_bool_3",
+    "partner",
+    "partner_balance",
+    "partner_pay",
+    "trafic_wl",
+    "limit_wl",
+    "tickets",
+)
+
 
 def _model_column_names(model) -> list[str]:
     return [c.key for c in model.__table__.columns]
@@ -104,7 +127,7 @@ def _first_site_sheet_column_names(*, users_full_columns: bool, users_all_column
 
 def _user_sheet_column_names(*, users_full_columns: bool, users_all_columns: bool) -> list[str]:
     if users_all_columns:
-        return _model_column_names(Users)
+        return list(_USERS_EXPORT_ADMIN_COLUMNS)
     if users_full_columns:
         return [
             c.key
@@ -159,7 +182,7 @@ async def _export_database_to_excel_impl(
     users_all_columns: bool = False,
     include_users: bool = True,
 ) -> None:
-    """Экспорт базы в Excel; users_all_columns — все колонки users (/export), users_full_columns — для партнёра."""
+    """Экспорт базы в Excel; users_all_columns — фиксированный набор колонок users (/export), users_full_columns — для партнёра."""
     if message.from_user.id not in ADMIN_IDS:
         await message.answer("❌ Эта команда доступна только администраторам.")
         return
@@ -168,7 +191,7 @@ async def _export_database_to_excel_impl(
         if not include_users:
             start_msg = "🔄 Начинаю быстрый экспорт (без таблицы users)..."
         elif users_all_columns:
-            start_msg = "🔄 Начинаю полный экспорт базы данных (все таблицы, все поля users)..."
+            start_msg = "🔄 Начинаю экспорт базы данных (все таблицы, лист users — стандартный набор полей)..."
         elif users_full_columns:
             start_msg = "🔄 Начинаю экспорт базы данных (лист users — для партнёра)..."
         else:
@@ -672,7 +695,7 @@ async def _export_database_to_excel_impl(
             if not include_users:
                 users_sheet_note = "⚡ Без таблицы <code>users</code>.\n"
             elif users_all_columns:
-                users_sheet_note = "🧾 Лист <code>users</code>: все колонки таблицы.\n"
+                users_sheet_note = "🧾 Лист <code>users</code>: стандартный набор полей.\n"
             elif users_full_columns:
                 users_sheet_note = (
                     "🧾 Лист <code>users</code>: расширенный набор колонок (без паролей и служебных полей).\n"
@@ -725,7 +748,7 @@ async def _export_database_to_excel_impl(
 
 @router.message(Command(commands=["export"]))
 async def export_database_to_excel(message: Message):
-    """Полный экспорт базы данных в Excel: все таблицы, все поля users."""
+    """Экспорт базы данных в Excel: все таблицы, лист users — фиксированный набор полей."""
     await _export_database_to_excel_impl(message, users_all_columns=True)
 
 

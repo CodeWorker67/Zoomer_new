@@ -33,6 +33,7 @@ from utils.menu_ui import (
 )
 from web_api import create_bot_site_login_token
 from logging_config import logger
+from middleware.sync_tg_profile import maybe_sync_tg_profile_to_db
 from payments.tariff_gate import is_mobile_tariff_key
 import asyncio
 import re
@@ -96,7 +97,6 @@ async def _show_main_menu(
         buy_primary=not active,
         sub_url=sub_url or None,
         show_trial=not in_panel,
-        show_raffle=user.id in ADMIN_IDS,
     )
 
     if isinstance(source, CallbackQuery):
@@ -253,6 +253,7 @@ async def process_start_command(message: Message, command: Command):
                         None,
                     )
                 schedule_start_prize(message.from_user.id)
+            await maybe_sync_tg_profile_to_db(message.from_user)
             return
 
         else:
@@ -286,6 +287,7 @@ async def process_start_command(message: Message, command: Command):
             logger.info(f'Юзеру {message.from_user.id} - {message.from_user.username} присвоен ttclid')
         schedule_start_prize(message.from_user.id)
 
+    await maybe_sync_tg_profile_to_db(message.from_user)
     await _show_main_menu(message, send_hint=True)
 
 

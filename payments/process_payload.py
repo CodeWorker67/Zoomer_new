@@ -21,6 +21,11 @@ from wl_traffic.service import (
 )
 from wl_traffic.texts import format_wl_checker_traffic_purchase
 from services.wheel import grant_purchase_wheel_attempts, sync_partner_wheel_attempts
+from services.wheel_notify import (
+    notify_partner_wheel_attempts,
+    notify_purchase_wheel_attempts,
+)
+from services.raffle import grant_purchase_tickets, notify_purchase_tickets
 from services.wheel_discount import (
     commit_payload_discount,
     payer_id_from_payload_parts,
@@ -367,6 +372,8 @@ async def process_confirmed_payment(
             gift_message = lexicon["payment_gift"].format(duration, marker, gift_id)
 
             if giver_billing_id > 0:
+                wheel_extra = await grant_purchase_wheel_attempts(giver_billing_id, duration)
+                tickets_extra = await grant_purchase_tickets(giver_billing_id, duration)
                 try:
                     await bot.send_message(
                         chat_id=giver_billing_id,
@@ -387,7 +394,10 @@ async def process_confirmed_payment(
                     await _mark_connect_panel(transaction_id, is_card)
                 except Exception as e:
                     logger.error("❌ Ошибка отправки сообщения о подарке: {}", e)
+                await notify_purchase_wheel_attempts(giver_billing_id, wheel_extra)
+                await notify_purchase_tickets(giver_billing_id, tickets_extra)
             else:
+                await grant_purchase_tickets(giver_billing_id, duration)
                 logger.info("Подарок (сайт): уведомление в Telegram пропущено, giver_id={}", giver_billing_id)
 
             if payer_uid is not None:
@@ -509,14 +519,25 @@ async def process_confirmed_payment(
                 await sql.add_user(db_uid, True)
             await sql.update_reserve_field(db_uid)
 
-            await grant_purchase_wheel_attempts(db_uid, duration)
+            wheel_extra = await grant_purchase_wheel_attempts(db_uid, duration)
+            tickets_extra = await grant_purchase_tickets(db_uid, duration)
+            notify_uid = notify_tg if notify_tg is not None and notify_tg > 0 else (
+                db_uid if db_uid > 0 else None
+            )
             if (
                 not payer_had_paid_before
                 and payer_partner_id is not None
                 and payer_partner_id > 0
                 and payer_partner_id != db_uid
             ):
-                await sync_partner_wheel_attempts(payer_partner_id)
+                partner_delta = await sync_partner_wheel_attempts(payer_partner_id)
+                if partner_delta > 0:
+                    paid = await sql.select_partner_paid_count(payer_partner_id)
+                    await notify_partner_wheel_attempts(
+                        payer_partner_id,
+                        partner_delta,
+                        paid,
+                    )
 
             if not white_flag:
                 bonus_gb = subscription_bonus_gb(duration)
@@ -556,6 +577,10 @@ async def process_confirmed_payment(
                     logger.error("❌ Ошибка отправки уведомления: {}", e)
             else:
                 logger.info("Платёж сайта: Telegram-уведомление не отправлялось (db_uid={})", db_uid)
+
+            if notify_uid is not None:
+                await notify_purchase_wheel_attempts(notify_uid, wheel_extra)
+                await notify_purchase_tickets(notify_uid, tickets_extra)
 
             if payer_uid is not None:
                 if not await commit_payload_discount(

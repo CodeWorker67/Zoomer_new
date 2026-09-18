@@ -28,25 +28,6 @@ lexicon = {
           ' - <a href="https://telegra.ph/Polzovatelskoe-soglashenie-08-11-20">Пользовательское соглашение.</a>\n'
           ' - <a href="https://telegra.ph/Politika-konfidencialnosti-08-11-52">Политика конфиденциальности.</a>',
 
-    'start_prize_win': (
-        '<tg-emoji emoji-id="5837208434730077905">⭐️</tg-emoji> Поздравляем! Вы выиграли в конкурсе.\n\n'
-        'В розыгрыше участвовали пользователи, проявившие любую активность в боте. '
-        'Чем выше была активность, тем больше становились шансы на победу.\n\n'
-        '<tg-emoji emoji-id="5406745015365943482">⬇️</tg-emoji>Нажмите кнопку, чтобы узнать, какой приз вы получили.'
-    ),
-    'start_prize_reveal': (
-        '<tg-emoji emoji-id="5837208434730077905">⭐️</tg-emoji> Ваш приз — <b>скидки до 50%</b> на подписку Зумерский VPN!\n'
-        '<tg-emoji emoji-id="5206607081334906820">❗️</tg-emoji>Подходит на все устройства, гарантия работы или возврат!\n\n'
-        'Воспользоваться можно в течение 30 минут<tg-emoji emoji-id="5456140674028019486">⚡️</tg-emoji>'
-    ),
-    'start_prize_hurry': (
-        '<tg-emoji emoji-id="5274099962655816924">❗️</tg-emoji>ВАШ ВЫИГРЫШ СГОРИТ ЧЕРЕЗ 30 МИНУТ'
-        '<tg-emoji emoji-id="5274099962655816924">❗️</tg-emoji>\n\n'
-        'Мы подвели итоги розыгрыша среди активных пользователей Зумерского ВПН. '
-        'Вы оказались среди победителей, и ваш приз всё ещё закреплён за вами.\n\n'
-        '<tg-emoji emoji-id="5447644880824181073">⏳</tg-emoji> Осталось 30 минут. После этого выигрыш будет аннулирован без возможности восстановления'
-    ),
-
     'buy': '✅ Мы гарантируем работу сервиса и вернем деньги, если у вас не будет работать наш VPN\n\n' 
                  '• Соцсети без рекламы \n'
                  '• До 5 устройств одновременно \n'
@@ -173,6 +154,26 @@ lexicon = {
         "⬇️\n"
         "http://4zoomer.top/gift?{0}\n\n"
         "⚠️ <i>Страница открывается один раз — сохраните ссылку на подписку!</i>"
+    ),
+
+    'wheel_attempts_granted': (
+        'Вам начислено {count} {word} в '
+        '<a href="{wheel_url}">Колесе Зумера</a>!'
+    ),
+    'wheel_partner_friend_paid': (
+        'У вас оплатил {paid}-й друг, перешедший по ссылке партнёра.\n\n'
+        'Вам начислено {count} {word} в '
+        '<a href="{wheel_url}">Колесе Зумера</a>!'
+    ),
+    'subscription_manage_wheel': (
+        '🎡 <a href="{wheel_url}">Колесо Зумера</a>: {active} попыток'
+    ),
+    'subscription_manage_tickets': (
+        '{ticket_emoji}Билетики по розыгрышу: {tickets} шт.'
+    ),
+    'raffle_tickets_granted': (
+        'Вам начислено {count} билетиков в Розыгрыше! '
+        'Ваше общее количество билетов вы можете посмотреть в разделе Управление подпиской.'
     ),
 
     'wheel_vpn_success': (
@@ -845,23 +846,43 @@ def tickets_word(n: int) -> str:
     return 'билетов'
 
 
-def raffle_top_caption(rows: list[tuple[int, int]]) -> str:
-    lines = ['🏆 <b>Топ-10 держателей билетов</b>\n']
+def mask_raffle_fullname(fullname: str | None) -> str:
+    name = (fullname or '').strip()
+    if not name:
+        return '*****'
+    stars = min(max(len(name) - 1, 0), 7)
+    return f'{name[0]}{"*" * stars}'
+
+
+def raffle_top_caption(
+    rows: list[tuple[int, int, str | None]],
+    *,
+    own_tickets: int,
+) -> str:
+    from html import escape
+
+    lines = [
+        f'{TICKET_EMOJI_HTML}Ваши билетики по розыгрышу: {own_tickets} шт.',
+        '',
+        '🏆 <b>Топ-10 держателей билетов</b>',
+        '',
+    ]
     if not rows:
         lines.append('Пока здесь пусто — билетики появятся после покупок и подарков 🎟')
         return '\n'.join(lines)
-    for i, (_user_id, count) in enumerate(rows, start=1):
+    for i, (_user_id, count, fullname) in enumerate(rows, start=1):
         emoji = _RAFFLE_TOP_PLACE_EMOJI[i] if i < len(_RAFFLE_TOP_PLACE_EMOJI) else '🎟'
+        place = f'{i} место'.ljust(8)
+        masked = mask_raffle_fullname(fullname).ljust(8)
+        tickets = str(count).rjust(4)
         lines.append(
-            f'{emoji} <b>{i} место</b> — <b>{count}</b> {tickets_word(count)}'
+            f'{emoji} <code>{escape(place)} - {escape(masked)} - {escape(tickets)}</code>'
         )
     return '\n'.join(lines)
 
 
 def buy_caption(*, is_admin: bool = False) -> str:
     text = lexicon['buy']
-    if not is_admin:
-        return text
     return text.replace(
         '⬇️ Выберите тариф ⬇️',
         f'{_ADMIN_BUY_LOTTERY_LINE}\n\n⬇️ Выберите тариф ⬇️',
@@ -869,16 +890,11 @@ def buy_caption(*, is_admin: bool = False) -> str:
 
 
 def buy_menu_caption(*, is_admin: bool = False) -> str:
-    text = lexicon['buy_menu']
-    if not is_admin:
-        return text
-    return f'{text}\n\n{_ADMIN_BUY_LOTTERY_LINE}'
+    return f"{lexicon['buy_menu']}\n\n{_ADMIN_BUY_LOTTERY_LINE}"
 
 
 def gift_menu_caption(*, is_admin: bool = False, repeat_giver: bool = False) -> str:
     text = lexicon['gift_start_repeat'] if repeat_giver else lexicon['gift_start']
-    if not is_admin:
-        return text
     return f'{text}\n\n{_ADMIN_BUY_LOTTERY_LINE}'
 
 
@@ -898,8 +914,9 @@ def format_gift_tariff_label(
         body = f'{period} — {price} руб (выгода −{benefit}%)'
     else:
         body = f'{period} — {price} руб'
-    if is_admin:
-        from keyboard import admin_ticket_prefix
-        return f'{admin_ticket_prefix(duration_key)}{body}'
+    from keyboard import ticket_prefix
+    prefix = ticket_prefix(duration_key)
+    if prefix:
+        return f'{prefix}{body}'
     icon = _GIFT_TARIFF_ICONS.get(duration_key, '')
     return f'{icon} {body}' if icon else body

@@ -77,7 +77,7 @@ def keyboard_start(
     buy_primary: bool = True,
     sub_url: Optional[str] = None,
     show_trial: bool = False,
-    show_raffle: bool = False,
+    show_raffle: bool = True,
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     if has_active_sub:
@@ -258,7 +258,7 @@ _ADMIN_TARIFF_TICKETS = {
 }
 
 
-def admin_ticket_prefix(key: str) -> str:
+def ticket_prefix(key: str) -> str:
     n = _ADMIN_TARIFF_TICKETS.get(key)
     if not n:
         return ''
@@ -266,8 +266,9 @@ def admin_ticket_prefix(key: str) -> str:
 
 
 def tariff_button_label(key: str, *, is_admin: bool = False) -> str:
-    if is_admin:
-        return f'{admin_ticket_prefix(key)}{_TARIFF_LABELS[key]}'
+    prefix = ticket_prefix(key)
+    if prefix:
+        return f'{prefix}{_TARIFF_LABELS[key]}'
     return f'{_USER_TARIFF_EMOJI[key]}{_TARIFF_LABELS[key]}'
 
 
@@ -283,8 +284,9 @@ def trial_discount_tariff_button_text(key: str, *, is_admin: bool = False) -> st
         f' — {price} руб (−20%)',
         _TARIFF_LABELS[key],
     )
-    if is_admin:
-        return f'{admin_ticket_prefix(key)}{label}'
+    prefix = ticket_prefix(key)
+    if prefix:
+        return f'{prefix}{label}'
     return f'{_USER_TARIFF_EMOJI[key]}{label}'
 
 
@@ -790,48 +792,6 @@ def keyboard_devices_confirm(slot_key: str, device_idx: int) -> InlineKeyboardMa
                     callback_data=f"dev_sub_{slot_key}",
                 ),
             ],
-        ]
-    )
-
-
-def keyboard_start_prize_reveal() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="Узнать свой приз",
-                    callback_data="start_prize_reveal",
-                    icon_custom_emoji_id="5985472565508838112",
-                )
-            ]
-        ]
-    )
-
-
-def keyboard_start_prize_claim() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="Забрать скидку",
-                    callback_data="start_prize_claim",
-                    icon_custom_emoji_id="5406683434124859552",
-                )
-            ]
-        ]
-    )
-
-
-def keyboard_start_prize_hurry() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="Успеть оформить со скидкой",
-                    callback_data="start_prize_hurry",
-                    icon_custom_emoji_id="5406683434124859552",
-                )
-            ]
         ]
     )
 

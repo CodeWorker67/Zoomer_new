@@ -8,6 +8,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from bot import bot
 from config import ADMIN_IDS, THROTTLE_MAX_UPDATES, THROTTLE_WINDOW_SEC, WEB_API_PORT
 from utils.menu_photos import init_menu_photos
+from middleware.sync_tg_profile import SyncTgProfileMiddleware
 from middleware.user_throttle import UserThrottleMiddleware
 from config_bd.models import create_tables, engine
 from payments import pay_stars, pay_cryptobot, pay_platega, pay_wl_traffic
@@ -69,6 +70,7 @@ async def main() -> None:
             bypass_user_ids=ADMIN_IDS,
         )
     )
+    dp.update.outer_middleware(SyncTgProfileMiddleware())
     dp.include_router(handlers_wheel.router)
     dp.include_router(handlers_patner.router)
     dp.include_router(handlers_broadcast.router)

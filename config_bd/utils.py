@@ -468,16 +468,45 @@ class AsyncSQL:
         async with self.session_factory() as session:
             return await session.get(Users, internal_id)
 
-    async def get_top_ticket_holders(self, limit: int = 10) -> List[Tuple[int, int]]:
+    async def get_top_ticket_holders(self, limit: int = 10) -> List[Tuple[int, int, Optional[str]]]:
         async with self.session_factory() as session:
             stmt = (
-                select(Users.user_id, Users.tickets)
+                select(Users.user_id, Users.tickets, Users.fullname)
                 .where(Users.tickets > 0)
                 .order_by(Users.tickets.desc(), Users.user_id.asc())
                 .limit(limit)
             )
             result = await session.execute(stmt)
-            return [(int(uid), int(tickets or 0)) for uid, tickets in result.all()]
+            return [
+                (int(uid), int(tickets or 0), fullname)
+                for uid, tickets, fullname in result.all()
+            ]
+
+    async def get_tickets(self, user_id: int) -> int:
+        async with self.session_factory() as session:
+            stmt = select(Users.tickets).where(Users.user_id == user_id)
+            result = await session.execute(stmt)
+            val = result.scalar_one_or_none()
+            return int(val or 0)
+
+    async def add_tickets(self, user_id: int, amount: int) -> Optional[int]:
+        if amount == 0:
+            return await self.get_tickets(user_id)
+        async with self.session_factory() as session:
+            stmt = (
+                update(Users)
+                .where(Users.user_id == user_id)
+                .values(
+                    tickets=func.greatest(func.coalesce(Users.tickets, 0) + int(amount), 0)
+                )
+                .returning(Users.tickets)
+            )
+            result = await session.execute(stmt)
+            await session.commit()
+            row = result.scalar_one_or_none()
+            if row is None:
+                return None
+            return int(row)
 
     async def next_negative_user_id(self) -> int:
         """
@@ -2022,6 +2051,31 @@ class AsyncSQL:
             stmt = update(Users).where(Users.user_id == user_id).values(field_str_1=value)
             await session.execute(stmt)
             await session.commit()
+
+    async def fill_username_fullname_if_missing(
+        self,
+        user_id: int,
+        username: Optional[str],
+        fullname: Optional[str],
+    ) -> bool:
+        """Заполняет пустые username/fullname из Telegram. True — было изменение."""
+        async with self.session_factory() as session:
+            result = await session.execute(select(Users).where(Users.user_id == user_id))
+            user = result.scalar_one_or_none()
+            if user is None:
+                return False
+            values: dict = {}
+            if username and not (user.username or "").strip():
+                values["username"] = username
+            if fullname and not (user.fullname or "").strip():
+                values["fullname"] = fullname
+            if not values:
+                return False
+            await session.execute(
+                update(Users).where(Users.user_id == user_id).values(**values)
+            )
+            await session.commit()
+            return True
 
     async def update_field_bool_1(self, user_id: int, value: bool):
         async with self.session_factory() as session:

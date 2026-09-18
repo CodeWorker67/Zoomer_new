@@ -18,14 +18,14 @@ from wl_traffic.service import credit_wl_subscription_bonus, fetch_panel_user, r
 
 # Индексы 0..10 — строго как zoomer_wheel/src/data/prizes.js (включая weight=0)
 WHEEL_SEGMENTS: list[dict[str, Any]] = [
-    {"id": "vpn_2w", "index": 0, "weight": 25, "rim": "2 НЕДЕЛИ"},
+    {"id": "vpn_2w", "index": 0, "weight": 20, "rim": "2 НЕДЕЛИ"},
     {"id": "cash_100k", "index": 1, "weight": 0, "rim": "100 000 ₽"},
-    {"id": "vpn_1m", "index": 2, "weight": 15, "rim": "1 МЕСЯЦ"},
-    {"id": "disc_50", "index": 3, "weight": 5, "rim": "СКИДКА"},
-    {"id": "disc_10", "index": 4, "weight": 25, "rim": "СКИДКА"},
+    {"id": "vpn_1m", "index": 2, "weight": 10, "rim": "1 МЕСЯЦ"},
+    {"id": "disc_50", "index": 3, "weight": 7, "rim": "СКИДКА"},
+    {"id": "disc_10", "index": 4, "weight": 30, "rim": "СКИДКА"},
     {"id": "iphone", "index": 5, "weight": 0, "rim": "IPHONE 17"},
-    {"id": "vpn_3m", "index": 6, "weight": 5, "rim": "3 МЕСЯЦА"},
-    {"id": "disc_30", "index": 7, "weight": 15, "rim": "СКИДКА"},
+    {"id": "vpn_3m", "index": 6, "weight": 3, "rim": "3 МЕСЯЦА"},
+    {"id": "disc_30", "index": 7, "weight": 20, "rim": "СКИДКА"},
     {"id": "secret", "index": 8, "weight": 0, "rim": "СЕКРЕТ"},
     {"id": "cash_1k", "index": 9, "weight": 0, "rim": "1 000 ₽"},
     {"id": "gift", "index": 10, "weight": 10, "rim": "ПОДАРОК"},
@@ -418,18 +418,19 @@ async def merge_wheel_fortuna_on_account_link(old_billing_uid: int, telegram_use
         )
 
 
-async def grant_purchase_wheel_attempts(user_id: int, panel_days: int) -> None:
+async def grant_purchase_wheel_attempts(user_id: int, panel_days: int) -> int:
     extra = PURCHASE_DAYS_TO_ATTEMPTS.get(int(panel_days), 0)
     if extra <= 0:
-        return
+        return 0
     await sql.wheel_add_attempts(user_id, extra)
     logger.info("Wheel: +{} attempt(s) for user {} (purchase {} days)", extra, user_id, panel_days)
+    return extra
 
 
-async def sync_partner_wheel_attempts(partner_id: int) -> None:
+async def sync_partner_wheel_attempts(partner_id: int) -> int:
     """+1 попытка за каждые 7 оплативших друзей по partner-ссылке."""
     if partner_id <= 0:
-        return
+        return 0
     paid = await sql.select_partner_paid_count(partner_id)
     batches = paid // PARTNER_PAID_BATCH
     async with AsyncSessionLocal() as session:
@@ -444,7 +445,7 @@ async def sync_partner_wheel_attempts(partner_id: int) -> None:
         credited = int(row.partner_wheel_batches_credited or 0)
         if batches <= credited:
             await session.commit()
-            return
+            return 0
         delta = batches - credited
         row.attempt = int(row.attempt or 0) + delta
         row.partner_wheel_batches_credited = batches
@@ -457,6 +458,7 @@ async def sync_partner_wheel_attempts(partner_id: int) -> None:
             paid,
             batches,
         )
+        return delta
 
 
 async def wheel_begin_spin(

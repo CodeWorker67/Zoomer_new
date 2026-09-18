@@ -182,7 +182,24 @@ async def connect_screen_extra(uid: int, user_data: tuple) -> str:
             _devices, devices_count = await x3.get_user_hwid_devices(str(panel_user_id))
 
     devices_block = f"📱 Устройства: {devices_count} / {device_limit}"
-    return f"{wl_block}\n{devices_block}"
+
+    from lexicon import TICKET_EMOJI_HTML, lexicon
+    from services.wheel_notify import wheel_miniapp_tme_url
+
+    row = await sql.get_wheel_fortuna(uid)
+    attempt = int(row.attempt or 0) if row else 0
+    rotation = int(row.rotation_number or 0) if row else 0
+    active = max(0, attempt - rotation)
+    wheel_block = lexicon["subscription_manage_wheel"].format(
+        wheel_url=wheel_miniapp_tme_url(),
+        active=active,
+    )
+    tickets = await sql.get_tickets(uid)
+    tickets_block = lexicon["subscription_manage_tickets"].format(
+        ticket_emoji=TICKET_EMOJI_HTML,
+        tickets=tickets,
+    )
+    return f"{wl_block}\n{devices_block}\n{wheel_block}\n{tickets_block}"
 
 
 async def _replace_photo_message(

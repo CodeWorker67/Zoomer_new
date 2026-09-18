@@ -29,6 +29,8 @@ class Users(Base):
     __tablename__ = 'users'
     id = Column(Integer, primary_key=True)
     user_id = Column(BigInteger, unique=True, nullable=False)
+    username = Column(String(255), nullable=True)
+    fullname = Column(String(255), nullable=True)
     ref = Column(String(100), nullable=True)
     is_delete = Column(Boolean, default=False)
     in_panel = Column(Boolean, default=False)

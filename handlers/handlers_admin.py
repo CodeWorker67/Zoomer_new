@@ -238,6 +238,35 @@ async def user_info(message: Message):
         await message.answer(f'Ошибка при формировании сообщения: {str(e)}')
 
 
+@router.message(Command(commands=['add_tickets']))
+async def add_tickets_cmd(message: Message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    args = (message.text or "").split()
+    if len(args) != 3:
+        await message.answer("❌ Использование: /add_tickets <telegram_id> <кол-во>")
+        return
+    try:
+        user_id = int(args[1].strip())
+        amount = int(args[2].strip())
+    except ValueError:
+        await message.answer("❌ telegram_id и кол-во должны быть целыми числами.")
+        return
+    if amount == 0:
+        await message.answer("❌ Кол-во не должно быть 0.")
+        return
+    if await sql.get_user(user_id) is None:
+        await message.answer(f"❌ Пользователь с ID {user_id} не найден в базе данных.")
+        return
+    total = await sql.add_tickets(user_id, amount)
+    await message.answer(
+        f"✅ Пользователю {user_id} изменено билетов на {amount}. Всего: {total}"
+    )
+    if amount > 0:
+        from services.raffle import notify_purchase_tickets
+        await notify_purchase_tickets(user_id, amount)
+
+
 @router.message(Command(commands=['gift']))
 async def gift_info_command(message: Message):
     """Информация о подарке по gift_id."""

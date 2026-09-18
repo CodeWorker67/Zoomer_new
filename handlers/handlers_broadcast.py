@@ -23,6 +23,8 @@ from keyboard import (
     STYLE_SUCCESS,
     STYLE_PRIMARY,
     STYLE_DANGER,
+    RAFFLE_PARTICIPATE_CB,
+    RAFFLE_TOP_CB,
 )
 from logging_config import logger
 import asyncio
@@ -81,6 +83,8 @@ CUSTOM_PRESETS = [
     ("ref_invite", "Пригласить друзей🫶", STYLE_SUCCESS),
     ("partner_earn", "💵Заработай с нами!", None),
     ("buy_gift", "🎁 Подарить подписку", STYLE_SUCCESS),
+    (RAFFLE_PARTICIPATE_CB, "Принять участие", STYLE_SUCCESS),
+    (RAFFLE_TOP_CB, "Топ держателей билетов", STYLE_SUCCESS),
     ("r_7", "👌 7 дней — 99 руб", STYLE_PRIMARY),
     ("r_30", "🤝 30 дней — 299 руб", STYLE_PRIMARY),
     ("r_90", "✅ 90 дней — 749 руб (выгода −17%)", STYLE_SUCCESS),

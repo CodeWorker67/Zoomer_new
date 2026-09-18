@@ -386,6 +386,25 @@ async def pay_info_command(message: Message):
     used_wl_gb = await get_wl_used_gb_for_user(x3, target_id, trafic_wl, sql=sql)
     remaining_wl = max(0.0, round(limit_wl - used_wl_gb, 2))
 
+    tickets = await sql.get_tickets(target_id)
+    wheel = await sql.get_wheel_fortuna(target_id)
+    if wheel is None:
+        wheel_block = "нет записи"
+    else:
+        attempt = int(wheel.attempt or 0)
+        rotation = int(wheel.rotation_number or 0)
+        active = max(0, attempt - rotation)
+        pending = wheel.pending_prize_id or "нет"
+        wheel_block = (
+            f"├ attempt: <b>{attempt}</b>\n"
+            f"├ rotation: <b>{rotation}</b>\n"
+            f"├ активных: <b>{active}</b>\n"
+            f"├ скидки: −10% <b>{int(wheel.discount_10 or 0)}</b>, "
+            f"−30% <b>{int(wheel.discount_30 or 0)}</b>, "
+            f"−50% <b>{int(wheel.discount_50 or 0)}</b>\n"
+            f"└ pending: <code>{pending}</code>"
+        )
+
     body = (
         f"<b>/pay {target_id}</b>\n\n"
         f"Подписка обычная в БД бота — {_pay_dt_str(sub_db)}\n"
@@ -395,6 +414,9 @@ async def pay_info_command(message: Message):
         f"├ Лимит: <b>{limit_wl:.2f} GB</b>\n"
         f"├ Использовано: <b>{used_wl_gb:.2f} GB</b>\n"
         f"└ Осталось: <b>{remaining_wl:.2f} GB</b>\n\n"
+        f"🎟 <b>Билеты:</b> {tickets}\n\n"
+        f"🎡 <b>Колесо фортуны</b>\n"
+        f"{wheel_block}\n\n"
         f"<b>Платежи:</b>\n"
     )
     if pay_lines:

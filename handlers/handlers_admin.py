@@ -238,13 +238,13 @@ async def user_info(message: Message):
         await message.answer(f'Ошибка при формировании сообщения: {str(e)}')
 
 
-@router.message(Command(commands=['add_tickets']))
+@router.message(Command(commands=['add_ticket', 'add_tickets']))
 async def add_tickets_cmd(message: Message):
     if message.from_user.id not in ADMIN_IDS:
         return
     args = (message.text or "").split()
     if len(args) != 3:
-        await message.answer("❌ Использование: /add_tickets <telegram_id> <кол-во>")
+        await message.answer("❌ Использование: /add_ticket <telegram_id> <кол-во>")
         return
     try:
         user_id = int(args[1].strip())

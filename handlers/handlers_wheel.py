@@ -77,3 +77,5 @@ async def cmd_add_wheel(message: Message) -> None:
         f"активных: <b>{active}</b>",
         parse_mode="HTML",
     )
+    from services.wheel_notify import notify_purchase_wheel_attempts
+    await notify_purchase_wheel_attempts(target_id, add_count)

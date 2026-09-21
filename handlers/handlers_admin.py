@@ -1,8 +1,9 @@
 import random
 import os
 import tempfile
+from dataclasses import dataclass
 from datetime import datetime, date, timezone, timedelta
-from typing import Optional
+from typing import List, Optional
 
 import openpyxl
 from openpyxl.styles import Alignment, Border, Side, PatternFill
@@ -34,10 +35,14 @@ from wl_traffic.service import (
     fetch_panel_user,
     fetch_wl_traffic_gb_for_day,
     get_wl_used_gb_for_user,
+    is_forever_end_date,
     reassign_to_active_squad,
+    resolve_panel_username,
     user_on_active_squad,
     user_on_limited_squad,
 )
+from utils.menu_ui import has_active_subscription
+from handlers.handlers_devices import _device_display_name
 
 _ADD_TRAFFIC_ALL_PROGRESS_EVERY = 100
 _USER_TUPLE_FIELD_BOOL_2 = 20
@@ -75,6 +80,26 @@ def _msk_dt_str(dt: Optional[datetime]) -> str:
     else:
         aware = dt.astimezone(timezone.utc)
     return aware.astimezone(_MSK).strftime("%d-%m-%Y %H:%M МСК")
+
+
+def _find_date_str(dt: Optional[datetime]) -> str:
+    if dt is None:
+        return "—"
+    if dt.tzinfo is None:
+        aware = dt.replace(tzinfo=timezone.utc)
+    else:
+        aware = dt.astimezone(timezone.utc)
+    return aware.astimezone(_MSK).strftime("%d.%m.%Y")
+
+
+def _find_reg_date_str(dt: Optional[datetime]) -> str:
+    return _find_date_str(dt)
+
+
+def _find_payment_product_label(kind: str) -> str:
+    if kind == "Трафик":
+        return "Трафик"
+    return "Подписка"
 
 
 def _pay_dt_str(dt: Optional[datetime]) -> str:
@@ -127,6 +152,84 @@ def _split_long_text(text: str, limit: int = 3800) -> list[str]:
         parts.append(rest[:limit])
         rest = rest[limit:]
     return parts
+
+
+def _split_find_text(text: str, limit: int = 3500) -> List[str]:
+    """Разбиение текста /find с сохранением границ строк (клавиатура на последнем фрагменте)."""
+    if len(text) <= limit:
+        return [text]
+    chunks: List[str] = []
+    while text:
+        if len(text) <= limit:
+            chunks.append(text)
+            break
+        cut = text.rfind("\n\n", 0, limit)
+        if cut <= 0:
+            cut = text.rfind("\n", 0, limit)
+        if cut <= 0:
+            cut = limit
+        else:
+            cut += 2 if text[cut : cut + 2] == "\n\n" else 1
+        chunks.append(text[:cut].rstrip())
+        text = text[cut:].lstrip("\n")
+    return chunks
+
+
+async def _send_find_message(
+    message: Message,
+    text: str,
+    keyboard: Optional[InlineKeyboardMarkup] = None,
+) -> None:
+    chunks = _split_find_text(text)
+    for i, chunk in enumerate(chunks):
+        reply_markup = keyboard if i == len(chunks) - 1 else None
+        await message.answer(
+            chunk,
+            parse_mode="HTML",
+            reply_markup=reply_markup,
+            disable_web_page_preview=True,
+        )
+
+
+async def _refresh_find_message(
+    callback: CallbackQuery,
+    text: str,
+    keyboard: Optional[InlineKeyboardMarkup] = None,
+) -> None:
+    chunks = _split_find_text(text)
+    msg = callback.message
+    if msg is None:
+        return
+    if len(chunks) == 1:
+        try:
+            await msg.edit_text(
+                chunks[0],
+                parse_mode="HTML",
+                reply_markup=keyboard,
+                disable_web_page_preview=True,
+            )
+        except Exception as e:
+            logger.warning("find callback edit_text failed: {}", e)
+            await msg.answer(
+                chunks[0],
+                parse_mode="HTML",
+                reply_markup=keyboard,
+                disable_web_page_preview=True,
+            )
+        return
+    try:
+        await msg.edit_text(chunks[0], parse_mode="HTML", disable_web_page_preview=True)
+    except Exception as e:
+        logger.warning("find callback edit_text failed: {}", e)
+        await msg.answer(chunks[0], parse_mode="HTML", disable_web_page_preview=True)
+    for chunk in chunks[1:-1]:
+        await msg.answer(chunk, parse_mode="HTML", disable_web_page_preview=True)
+    await msg.answer(
+        chunks[-1],
+        parse_mode="HTML",
+        reply_markup=keyboard,
+        disable_web_page_preview=True,
+    )
 
 
 _DELETE_STAMPS = ("nnnn", "premium")
@@ -244,7 +347,10 @@ async def add_tickets_cmd(message: Message):
         return
     args = (message.text or "").split()
     if len(args) != 3:
-        await message.answer("❌ Использование: /add_ticket <telegram_id> <кол-во>")
+        await message.answer(
+            "❌ Использование: /add_ticket <telegram_id> <кол-во>\n"
+            "Отрицательное число уменьшает билеты (не ниже 0)."
+        )
         return
     try:
         user_id = int(args[1].strip())
@@ -378,7 +484,7 @@ async def pay_info_command(message: Message):
 
     pay_rows = await sql.get_user_subscription_payment_report(target_id)
     pay_lines: list[str] = []
-    for tc, kind, method, detail in pay_rows:
+    for tc, kind, method, detail, _amount in pay_rows:
         ts = _pay_dt_str(tc)
         pay_lines.append(f"• {ts} — {kind} — {method} — {detail}")
 
@@ -428,6 +534,488 @@ async def pay_info_command(message: Message):
         await message.answer(chunk, parse_mode="HTML")
 
 
+_PARTNER_REFERRALS_LIST_LIMIT = 30
+
+_FIND_SLOT_SPECS: tuple[tuple[str, str, str], ...] = (
+    ("main", "", _SUB_TIER_LABELS["main"]),
+    ("white", "_white", _SUB_TIER_LABELS["white"]),
+)
+
+
+@dataclass(frozen=True)
+class _FindLongestSub:
+    tg_id: int
+    slot_key: str
+    label: str
+
+
+def _parse_panel_expire_at(raw: Optional[str]) -> Optional[datetime]:
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def _panel_username_for_find_slot(user_row: tuple, slot_key: str) -> str:
+    reg_un, white_un = _panel_usernames_from_row(user_row)
+    return white_un if slot_key == "white" else reg_un
+
+
+async def _find_longest_subscription(tg_id: int, user_row: tuple) -> _FindLongestSub:
+    candidates: list[tuple[datetime, str, str]] = []
+
+    sub_end = user_row[9]
+    if sub_end is not None:
+        if sub_end.tzinfo is None:
+            dt = sub_end.replace(tzinfo=timezone.utc)
+        else:
+            dt = sub_end.astimezone(timezone.utc)
+        candidates.append((dt, "main", _SUB_TIER_LABELS["main"]))
+
+    for slot_key, _suffix, label in _FIND_SLOT_SPECS:
+        username = _panel_username_for_find_slot(user_row, slot_key)
+        panel_resp = await x3.get_user_by_username(username)
+        panel_user = x3._panel_user_from_response(panel_resp)
+        if not panel_user:
+            continue
+        exp = _parse_panel_expire_at(panel_user.get("expireAt"))
+        if exp is not None:
+            candidates.append((exp, slot_key, label))
+
+    if not candidates:
+        return _FindLongestSub(tg_id=tg_id, slot_key="main", label=_SUB_TIER_LABELS["main"])
+
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    _end, slot_key, label = candidates[0]
+    return _FindLongestSub(tg_id=tg_id, slot_key=slot_key, label=label)
+
+
+def _find_keyboard(longest: _FindLongestSub) -> InlineKeyboardMarkup:
+    tg_id = longest.tg_id
+    slot = longest.slot_key
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="+ 7 дней", callback_data=f"find:d7:{tg_id}:{slot}"
+                ),
+                InlineKeyboardButton(
+                    text="+ 30 дней", callback_data=f"find:d30:{tg_id}:{slot}"
+                ),
+                InlineKeyboardButton(
+                    text="+ 90 дней", callback_data=f"find:d90:{tg_id}:{slot}"
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="+ 10 ГБ", callback_data=f"find:g10:{tg_id}"
+                ),
+                InlineKeyboardButton(
+                    text="+ 50 ГБ", callback_data=f"find:g50:{tg_id}"
+                ),
+            ],
+        ]
+    )
+
+
+async def _apply_find_add_days(
+    tg_id: int, slot_key: str, days: int
+) -> tuple[bool, str]:
+    user_row = await sql.get_user(tg_id)
+    if not user_row:
+        return False, "Пользователь не найден"
+
+    username = _panel_username_for_find_slot(user_row, slot_key)
+    ok = await x3.updateClient(days, username, tg_id)
+    if not ok:
+        return False, "Не удалось продлить подписку в панели"
+
+    end_dt = await sql.get_subscription_end_date(tg_id)
+    if end_dt is None:
+        ar = await x3.activ(username)
+        t = ar.get("time", "-")
+        notice = f"+{days} дн. → {t}"
+    else:
+        notice = f"+{days} дн. → {_msk_dt_str(end_dt)}"
+
+    if is_telegram_chat_id(tg_id) and slot_key == "main":
+        try:
+            sub_link = await x3.sublink(username)
+            tier = _SUB_TIER_LABELS.get(slot_key, slot_key)
+            end_for_text = end_dt or datetime.now(timezone.utc)
+            user_text = lexicon["sub_granted_notify"].format(
+                tier=tier,
+                end_date=_msk_dt_str(end_for_text),
+            )
+            await bot.send_message(
+                tg_id,
+                user_text,
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+                reply_markup=keyboard_sub_after_buy(sub_link) if sub_link else None,
+            )
+        except Exception as e:
+            logger.error("find +days notify user={}: {}", tg_id, e)
+
+    return True, notice
+
+
+async def _apply_find_add_traffic(tg_id: int, gb: float) -> tuple[bool, str]:
+    user_row = await sql.get_user(tg_id)
+    if not user_row:
+        return False, "Пользователь не найден"
+
+    trafic_wl, _ = await sql.get_wl_limits(tg_id)
+    used_gb = await get_wl_used_gb_for_user(x3, tg_id, trafic_wl, sql=sql)
+
+    await sql.add_wl_limit(tg_id, gb)
+    _, limit_wl = await sql.get_wl_limits(tg_id)
+    remaining_gb = max(0.0, round(limit_wl - used_gb, 2))
+
+    panel_user = await fetch_panel_user(x3, tg_id, sql=sql)
+    if panel_user:
+        user_row_after = await sql.get_user(tg_id)
+        field_bool_2 = (
+            bool(user_row_after[_USER_TUPLE_FIELD_BOOL_2]) if user_row_after else False
+        )
+        if (
+            user_on_limited_squad(panel_user)
+            and limit_wl > used_gb
+            and not field_bool_2
+        ):
+            await reassign_to_active_squad(x3, panel_user)
+
+    if is_telegram_chat_id(tg_id) and gb > 0:
+        try:
+            await bot.send_message(
+                chat_id=tg_id,
+                text=lexicon["wl_traffic_admin_grant"].format(
+                    gb=gb,
+                    limit_gb=limit_wl,
+                    used_gb=used_gb,
+                    remaining_gb=remaining_gb,
+                ),
+                parse_mode="HTML",
+                reply_markup=create_kb(1, back_to_main=BTN_BACK),
+            )
+        except Exception as e:
+            logger.error("find +traffic notify user={}: {}", tg_id, e)
+
+    return True, f"+{gb:g} ГБ → лимит {limit_wl:.1f} ГБ"
+
+
+async def _format_devices_for_admin(tg_id: int) -> str:
+    lines: list[str] = []
+    slots = await x3.active_subscription_slots(tg_id)
+    if not slots:
+        return "нет"
+    for _slot_key, label, panel_user_id, _username in slots:
+        devices, _total = await x3.get_user_hwid_devices(panel_user_id)
+        if not devices:
+            lines.append(f"{label}: нет устройств")
+            continue
+        names = ", ".join(_device_display_name(d) for d in devices if isinstance(d, dict))
+        lines.append(f"{label}: {names}")
+    return "\n".join(lines) if lines else "нет"
+
+
+async def _build_find_message(
+    target_id: int, *, notice: str = ""
+) -> tuple[Optional[str], Optional[InlineKeyboardMarkup]]:
+    user_row = await sql.get_user(target_id)
+    if not user_row:
+        return None, None
+
+    user_obj = await sql.get_user_object_by_user_id(target_id)
+    lines: list[str] = [f"👤 <code>{target_id}</code>"]
+
+    name_parts: list[str] = []
+    if user_obj and (user_obj.fullname or "").strip():
+        name_parts.append((user_obj.fullname or "").strip())
+    if user_obj and (user_obj.username or "").strip():
+        uname = (user_obj.username or "").strip().lstrip("@")
+        name_parts.append(f"(@{uname})")
+    if name_parts:
+        lines.append(" ".join(name_parts))
+
+    create_user = user_row[6]
+    lines.append(f"Регистрация: {_find_reg_date_str(create_user)}")
+
+    ref_total = await sql.select_ref_count(target_id)
+    if ref_total:
+        ref_paid = await sql.select_ref_paid_count(target_id)
+        lines.append(f"Кол-во рефералов: {ref_paid}/{ref_total}")
+
+    partner_total = await sql.select_partner_count(target_id)
+    if partner_total:
+        partner_paid = await sql.select_partner_paid_count(target_id)
+        lines.append(f"Кол-во партнеров: {partner_paid}/{partner_total}")
+
+    partner_balance = user_row[24]
+    if partner_balance:
+        lines.append(f"Баланс партнера: {partner_balance}")
+
+    email = user_row[15]
+    if not email:
+        landing = await sql.get_landing_site_by_tg_id(target_id)
+        if landing and landing.email:
+            email = landing.email
+    if email:
+        lines.append(f"email: {email}")
+
+    lines.append("")
+    tickets = await sql.get_tickets(target_id)
+    lines.append(f"Билетики: {tickets}")
+
+    wheel = await sql.get_wheel_fortuna(target_id)
+    if wheel is None:
+        lines.append("Колесо фортуны: нет записи")
+    else:
+        attempt = int(wheel.attempt or 0)
+        rotation = int(wheel.rotation_number or 0)
+        wheel_line = f"Колесо фортуны: {rotation}/{attempt}"
+        hist = (wheel.history or "").strip()
+        if hist:
+            if len(hist) > 500:
+                hist = hist[:500] + "…"
+            wheel_line += f"\nhistory: {hist}"
+        lines.append(wheel_line)
+
+    lines.append("")
+    sub_end = user_row[9]
+    if has_active_subscription(user_row):
+        if is_forever_end_date(sub_end):
+            sub_status = "активна (навсегда)"
+        else:
+            if sub_end.tzinfo is None:
+                end_aware = sub_end.replace(tzinfo=timezone.utc)
+            else:
+                end_aware = sub_end.astimezone(timezone.utc)
+            end_msk = end_aware.astimezone(_MSK)
+            now_msk = datetime.now(_MSK)
+            days_left = max(0, (end_msk.date() - now_msk.date()).days)
+            sub_status = (
+                f"активна до {end_msk.strftime('%d.%m.%Y')} "
+                f"(осталось {days_left} дн.)"
+            )
+    else:
+        sub_status = "не активна"
+    lines.append(f"Подписка: {sub_status}")
+
+    try:
+        panel_un = await resolve_panel_username(sql, target_id)
+        sub_url = await x3.sublink(panel_un)
+    except Exception:
+        logger.exception("/find: sublink")
+        sub_url = None
+    if sub_url:
+        lines.append(f"Ссылка: {sub_url}")
+
+    devices_block = await _format_devices_for_admin(target_id)
+    lines.append(f"Устройства: {devices_block}")
+
+    trafic_wl, limit_wl = await sql.get_wl_limits(target_id)
+    used_wl_gb = await get_wl_used_gb_for_user(x3, target_id, trafic_wl, sql=sql)
+    remaining_wl = max(0.0, round(limit_wl - used_wl_gb, 2))
+    lines.append("")
+    lines.append(
+        f"Трафик: {used_wl_gb:.1f} / {limit_wl:g} ГБ  "
+        f"(осталось {remaining_wl:g} ГБ)"
+    )
+
+    pay_rows = await sql.get_user_subscription_payment_report(target_id)
+    lines.append("")
+    lines.append("Оплаты:")
+    if pay_rows:
+        for tc, kind, _method, detail, amount in pay_rows:
+            dt_s = _find_date_str(tc)
+            product = _find_payment_product_label(kind)
+            lines.append(f"  {dt_s}  {detail}  {product}  {amount} ₽")
+    else:
+        lines.append("  нет")
+
+    longest = await _find_longest_subscription(target_id, user_row)
+    notice_line = f"\n\n✅ {notice}" if notice else ""
+    text = "\n".join(lines) + notice_line
+    keyboard = _find_keyboard(longest)
+    return text, keyboard
+
+
+@router.message(Command(commands=["find"]))
+async def find_user_command(message: Message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    args = (message.text or "").split()
+    if len(args) < 2:
+        await message.answer(
+            "❌ Использование: /find <telegram_id>\nНапример: /find 123456789"
+        )
+        return
+
+    try:
+        target_id = int(args[1].strip())
+    except ValueError:
+        await message.answer("❌ ID должен быть числом.")
+        return
+
+    try:
+        text, keyboard = await _build_find_message(target_id)
+    except Exception as e:
+        logger.exception("/find")
+        await message.answer(f"❌ Ошибка: {e}")
+        return
+
+    if text is None:
+        await message.answer(f"❌ Пользователь {target_id} не найден в базе данных.")
+        return
+
+    await _send_find_message(message, text, keyboard)
+
+
+@router.callback_query(F.data.startswith("find:"))
+async def find_action_callback(callback: CallbackQuery):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("❌ Только для админов", show_alert=True)
+        return
+
+    parts = (callback.data or "").split(":")
+    if len(parts) < 3:
+        await callback.answer("❌ Некорректные данные", show_alert=True)
+        return
+
+    action = parts[1]
+    try:
+        tg_id = int(parts[2])
+    except ValueError:
+        await callback.answer("❌ Некорректный ID", show_alert=True)
+        return
+
+    notice = ""
+    if action in ("d7", "d30", "d90"):
+        if len(parts) < 4:
+            await callback.answer("❌ Некорректные данные", show_alert=True)
+            return
+        days_map = {"d7": 7, "d30": 30, "d90": 90}
+        days = days_map[action]
+        slot_key = parts[3]
+        if slot_key not in ("main", "white"):
+            await callback.answer("❌ Некорректный слот", show_alert=True)
+            return
+        ok, msg = await _apply_find_add_days(tg_id, slot_key, days)
+        if not ok:
+            await callback.answer(msg, show_alert=True)
+            return
+        notice = msg
+    elif action in ("g10", "g50"):
+        gb_map = {"g10": 10.0, "g50": 50.0}
+        gb = gb_map[action]
+        ok, msg = await _apply_find_add_traffic(tg_id, gb)
+        if not ok:
+            await callback.answer(msg, show_alert=True)
+            return
+        notice = msg
+    else:
+        await callback.answer("❌ Неизвестное действие", show_alert=True)
+        return
+
+    try:
+        text, keyboard = await _build_find_message(tg_id, notice=notice)
+    except Exception as e:
+        logger.exception("find callback rebuild")
+        await callback.answer(f"❌ {e}", show_alert=True)
+        return
+
+    if text is None:
+        await callback.answer("❌ Пользователь не найден", show_alert=True)
+        return
+
+    await _refresh_find_message(callback, text, keyboard)
+    await callback.answer(notice)
+
+
+@router.message(Command(commands=["find_transaction"]))
+async def find_transaction_command(message: Message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    args = (message.text or "").split(maxsplit=1)
+    if len(args) < 2 or not args[1].strip():
+        await message.answer(
+            "❌ Использование: /find_transaction <transaction_id>\n"
+            "Можно указать id строки в таблице оплат или invoice_id CryptoBot."
+        )
+        return
+
+    ref = args[1].strip()
+    try:
+        row = await sql.admin_find_payment(ref)
+    except Exception as e:
+        logger.exception("/find_transaction")
+        await message.answer(f"❌ Ошибка: {e}")
+        return
+
+    if row is None:
+        await message.answer(f"❌ Оплата «{ref}» не найдена.")
+        return
+
+    gift_s = "Да" if row["is_gift"] else "Нет"
+    tc = row["time_created"]
+    if tc and tc.tzinfo is None:
+        tc_disp = tc.replace(tzinfo=timezone.utc).astimezone(_MSK).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+    elif tc:
+        tc_disp = tc.astimezone(_MSK).strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        tc_disp = "—"
+
+    try:
+        amount_i = int(round(float(row["amount"])))
+    except (TypeError, ValueError):
+        amount_i = row["amount"]
+
+    body = (
+        f"<b>Оплата</b> ({row['table']})\n\n"
+        f"status: {row['status'] or '—'}\n"
+        f"Создана: {tc_disp}\n"
+        f"user_id: {row['user_id']}\n"
+        f"duration: {row['duration']}\n"
+        f"Подарок: {gift_s}\n"
+        f"method: {row['method']}\n"
+        f"Сумма: {amount_i} ₽"
+    )
+    if row.get("transaction_id"):
+        body += f"\ntransaction_id: <code>{row['transaction_id']}</code>"
+    await message.answer(body, parse_mode="HTML")
+
+
+_ADMIN_INFO_TEXT = (
+    "<b>Команды администратора</b>\n\n"
+    "<b>/pay</b> — подписки (БД/панель), WL-трафик, билеты, колесо, список оплат.\n"
+    "<b>/find</b> — карточка пользователя (+ кнопки +7/+30/+90 дн. и +10/+50 ГБ).\n"
+    "<b>/sub</b> — дата окончания подписки в БД и панели (white — только панель).\n"
+    "<b>/add_traffic</b> — изменить limit_wl (GB; отрицательное значение уменьшает лимит).\n"
+    "<b>/partner</b> — статистика партнёра и топ приглашённых по сумме оплат.\n"
+    "<b>/partner_remove</b> — списать сумму с partner_balance (вывод).\n"
+    "<b>/add_wheel</b> — изменить attempt колеса (+/−, не ниже rotation).\n"
+    "<b>/add_tickets</b> — изменить билеты (+/−).\n"
+    "<b>/find_transaction</b> — найти оплату по transaction_id или id записи."
+)
+
+
+@router.message(Command(commands=["info"]))
+async def admin_info_command(message: Message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    await message.answer(_ADMIN_INFO_TEXT, parse_mode="HTML")
+
+
 async def _partner_admin_stats_text(tg_id: int) -> Optional[str]:
     user = await sql.get_user_object_by_user_id(tg_id)
     if user is None:
@@ -439,14 +1027,28 @@ async def _partner_admin_stats_text(tg_id: int) -> Optional[str]:
     paid_out = user.partner_pay or 0
     total_earned = balance + paid_out
 
-    return (
-        f"📊 <b>Статистика {tg_id}:</b>\n\n"
-        f"👥 Друзей перешло (/start): <b>{referrals}</b>\n"
-        f"💳 Приобретено подписок друзьями на: <b>{payments_sum} ₽</b>\n\n"
-        f"💵 Заработок партнёра (всего): <b>{total_earned} ₽</b>\n"
-        f"✅ Выведено: <b>{paid_out} ₽</b>\n"
-        f"🏦 Осталось на вывод: <b>{balance} ₽</b>"
-    )
+    lines = [
+        f"📊 <b>Статистика {tg_id}:</b>",
+        "",
+        f"👥 Друзей перешло (/start): <b>{referrals}</b>",
+        f"💳 Приобретено подписок друзьями на: <b>{payments_sum} ₽</b>",
+        "",
+        f"💵 Заработок партнёра (всего): <b>{total_earned} ₽</b>",
+        f"✅ Выведено: <b>{paid_out} ₽</b>",
+        f"🏦 Осталось на вывод: <b>{balance} ₽</b>",
+    ]
+
+    referral_totals = await sql.select_partner_referrals_payment_totals(tg_id)
+    if referral_totals:
+        lines.extend(["", "<b>Оплаты партнеров</b>"])
+        shown = referral_totals[:_PARTNER_REFERRALS_LIST_LIMIT]
+        for uid, rub in shown:
+            lines.append(f"{uid} - {rub} руб")
+        rest = len(referral_totals) - len(shown)
+        if rest > 0:
+            lines.append(f"(и еще {rest} партнеров)")
+
+    return "\n".join(lines)
 
 
 @router.message(Command(commands=['partner']))
@@ -1904,7 +2506,8 @@ async def add_traffic_command(message: Message):
     if len(args) < 3:
         await message.answer(
             "❌ Использование: /add_traffic <telegram_id> <GB>\n"
-            "Например: /add_traffic 123456789 10"
+            "Например: /add_traffic 123456789 10\n"
+            "Отрицательное GB уменьшает limit_wl."
         )
         return
 
@@ -1915,8 +2518,8 @@ async def add_traffic_command(message: Message):
         await message.answer("❌ ID и количество GB должны быть числами.")
         return
 
-    if gb <= 0:
-        await message.answer("❌ Количество GB должно быть больше 0.")
+    if gb == 0:
+        await message.answer("❌ Количество GB не должно быть 0.")
         return
 
     user_row = await sql.get_user(target_id)
@@ -1948,18 +2551,22 @@ async def add_traffic_command(message: Message):
             else:
                 squad_note = "\n⚠️ Не удалось переназначить squad в панели"
 
+    if gb > 0:
+        delta_label = f"Добавлено {gb:g} GB"
+    else:
+        delta_label = f"Уменьшено {-gb:g} GB"
     admin_text = (
-        f"✅ <b>Добавлено {gb:g} GB</b> для user <code>{target_id}</code>{squad_note}\n\n"
+        f"✅ <b>{delta_label}</b> для user <code>{target_id}</code>{squad_note}\n\n"
         f"├ Использовано: <b>{used_gb:.2f} GB</b>\n"
         f"└ Лимит: <b>{limit_wl:.2f} GB</b>"
     )
     await message.answer(admin_text, parse_mode="HTML")
     logger.info(
-        f"Админ {message.from_user.id}: /add_traffic uid={target_id} +{gb:g} GB "
+        f"Админ {message.from_user.id}: /add_traffic uid={target_id} {gb:+g} GB "
         f"used={used_gb:.2f} limit={limit_wl:.2f}"
     )
 
-    if target_id > 0:
+    if target_id > 0 and gb > 0:
         try:
             await bot.send_message(
                 chat_id=target_id,

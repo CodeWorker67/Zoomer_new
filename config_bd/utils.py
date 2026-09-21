@@ -117,6 +117,57 @@ def _parse_traffic_duration(raw: Optional[str]) -> Optional[int]:
         return None
 
 
+def _parse_payment_payload_map(payload: Optional[str]) -> dict[str, str]:
+    if not payload:
+        return {}
+    out: dict[str, str] = {}
+    for part in payload.split(","):
+        if ":" not in part:
+            continue
+        k, _, v = part.partition(":")
+        out[k.strip()] = v.strip()
+    return out
+
+
+def _payment_row_report_fields(
+    payload: Optional[str], is_gift: bool, amount: Any
+) -> Tuple[str, str, str]:
+    """(тип, способ оплаты, детали: «N дн.» / «N GB»)."""
+    m = _parse_payment_payload_map(payload)
+    method = _payment_method_label(m.get("method"))
+    raw_duration = m.get("duration")
+
+    traffic_gb = _parse_traffic_duration(raw_duration)
+    if traffic_gb is not None:
+        return "Трафик", method, f"{traffic_gb} GB"
+
+    white = m.get("white", "False").lower() == "true"
+    gift = bool(is_gift) or m.get("gift", "False").lower() == "true"
+    dur = _payload_duration_to_panel_days(raw_duration)
+    if dur is None:
+        try:
+            amt_f = float(amount)
+        except (TypeError, ValueError):
+            amt_f = None
+        if amt_f is not None:
+            if white:
+                dur = _white_days_from_amount_fallback(amt_f)
+            else:
+                dur = _billing_duration_from_amount_fallback(amt_f)
+
+    if gift and white:
+        label = "Подарок, вайт (mobile)"
+    elif gift:
+        label = "Подарок, обычная"
+    elif white:
+        label = "Вайт (mobile)"
+    else:
+        label = "Обычная"
+
+    days_s = f"{dur} дн." if dur is not None else "—"
+    return label, method, days_s
+
+
 def _payment_method_label(raw: Optional[str]) -> str:
     if not raw:
         return "—"
@@ -1442,20 +1493,34 @@ class AsyncSQL:
             await session.commit()
 
     async def wheel_add_attempts(self, user_id: int, count: int) -> None:
-        if count <= 0:
+        if count == 0:
             return
         async with self.session_factory() as session:
-            await session.execute(
-                pg_insert(WheelFortuna)
-                .values(user_id=user_id, attempt=count, rotation_number=0)
-                .on_conflict_do_update(
-                    index_elements=[WheelFortuna.user_id],
-                    set_={
-                        "attempt": WheelFortuna.attempt + count,
-                        "updated_at": datetime.now(),
-                    },
+            if count > 0:
+                await session.execute(
+                    pg_insert(WheelFortuna)
+                    .values(user_id=user_id, attempt=count, rotation_number=0)
+                    .on_conflict_do_update(
+                        index_elements=[WheelFortuna.user_id],
+                        set_={
+                            "attempt": WheelFortuna.attempt + count,
+                            "updated_at": datetime.now(),
+                        },
+                    )
                 )
-            )
+            else:
+                row = (
+                    await session.execute(
+                        select(WheelFortuna).where(WheelFortuna.user_id == user_id)
+                    )
+                ).scalar_one_or_none()
+                if row is None:
+                    return
+                rotation = int(row.rotation_number or 0)
+                current = int(row.attempt or 0)
+                new_attempt = max(rotation, current + count)
+                row.attempt = new_attempt
+                row.updated_at = datetime.now()
             await session.commit()
 
     async def wheel_collect_recent_history(
@@ -2001,6 +2066,102 @@ class AsyncSQL:
                     }
                 )
             return out
+
+    async def select_partner_referrals_payment_totals(
+        self, partner_id: int
+    ) -> List[Tuple[int, int]]:
+        """Приглашённые по partner: (tg_id, сумма успешных оплат), по убыванию суммы."""
+        async with self.session_factory() as session:
+            stmt = select(Users.user_id).where(Users.partner == str(partner_id))
+            user_ids = [int(r[0]) for r in (await session.execute(stmt)).all()]
+            if not user_ids:
+                return []
+
+            out: List[Tuple[int, int]] = []
+            for uid in user_ids:
+                paid_sum = 0
+                for model in _MERGE_PAYMENT_MODELS:
+                    stmt_sum = select(func.coalesce(func.sum(model.amount), 0)).where(
+                        model.user_id == uid,
+                        model.status.in_(_BILLING_OK_STATUSES),
+                    )
+                    paid_sum += int((await session.execute(stmt_sum)).scalar() or 0)
+                out.append((uid, paid_sum))
+            out.sort(key=lambda x: (-x[1], x[0]))
+            return out
+
+    async def admin_find_payment(self, ref: str) -> Optional[Dict[str, Any]]:
+        """Поиск платежа по transaction_id, invoice_id (CryptoBot) или id строки в таблице."""
+        key = (ref or "").strip()
+        if not key:
+            return None
+
+        tx_models: Tuple[Tuple[str, Any], ...] = (
+            ("payments", Payments),
+            ("payments_cards", PaymentsCards),
+            ("payments_platega_crypto", PaymentsPlategaCrypto),
+            ("payments_wata_sbp", PaymentsWataSBP),
+            ("payments_wata_card", PaymentsWataCard),
+            ("payments_fk_sbp", PaymentsFkSBP),
+        )
+        extra_models: Tuple[Tuple[str, Any], ...] = (
+            ("payments_stars", PaymentsStars),
+            ("payments_cryptobot", PaymentsCryptobot),
+        )
+
+        async with self.session_factory() as session:
+            for table_name, model in tx_models:
+                row = (
+                    await session.execute(
+                        select(model).where(model.transaction_id == key)
+                    )
+                ).scalar_one_or_none()
+                if row is not None:
+                    return self._admin_payment_row_dict(table_name, row)
+
+            if key.isdigit():
+                pk = int(key)
+                for table_name, model in (*tx_models, *extra_models):
+                    row = (await session.execute(select(model).where(model.id == pk))).scalar_one_or_none()
+                    if row is not None:
+                        return self._admin_payment_row_dict(table_name, row)
+
+            row = (
+                await session.execute(
+                    select(PaymentsCryptobot).where(PaymentsCryptobot.invoice_id == key)
+                )
+            ).scalar_one_or_none()
+            if row is not None:
+                return self._admin_payment_row_dict("payments_cryptobot", row)
+
+        return None
+
+    @staticmethod
+    def _admin_payment_row_dict(table_name: str, row: Any) -> Dict[str, Any]:
+        payload = getattr(row, "payload", None)
+        is_gift = bool(getattr(row, "is_gift", False))
+        amount = getattr(row, "amount", 0)
+        m = _parse_payment_payload_map(payload)
+        gift = is_gift or m.get("gift", "False").lower() == "true"
+        _kind, _method_label, duration = _payment_row_report_fields(payload, is_gift, amount)
+        method_raw = (m.get("method") or "").strip() or None
+        if table_name == "payments_cryptobot" and not method_raw:
+            method_raw = "cryptobot"
+        if table_name == "payments_stars" and not method_raw:
+            method_raw = "stars"
+        tx = getattr(row, "transaction_id", None) or getattr(row, "invoice_id", None)
+        return {
+            "table": table_name,
+            "status": getattr(row, "status", None),
+            "time_created": getattr(row, "time_created", None),
+            "user_id": int(getattr(row, "user_id", 0)),
+            "amount": amount,
+            "is_gift": gift,
+            "method": method_raw or "—",
+            "duration": duration,
+            "transaction_id": tx,
+            "payload": payload,
+        }
 
     async def update_partner_flag(self, user_id: int, flag: bool = True) -> None:
         async with self.session_factory() as session:
@@ -4281,60 +4442,12 @@ class AsyncSQL:
 
     async def get_user_subscription_payment_report(
         self, user_id: int
-    ) -> List[Tuple[datetime, str, str, str]]:
+    ) -> List[Tuple[datetime, str, str, str, int]]:
         """
         Успешные платежи пользователя (confirmed/paid) по всем таблицам оплат.
-        Возвращает список (time_created, тип, способ оплаты, детали: «N дн.» или «N GB»).
+        Возвращает список (time_created, тип, способ, детали, amount).
         """
-        rows_acc: List[Tuple[datetime, str, str, str]] = []
-
-        def _parse_map(payload: Optional[str]) -> dict[str, str]:
-            if not payload:
-                return {}
-            out: dict[str, str] = {}
-            for part in payload.split(","):
-                if ":" not in part:
-                    continue
-                k, _, v = part.partition(":")
-                out[k.strip()] = v.strip()
-            return out
-
-        def _row_report_fields(
-            payload: Optional[str], is_gift: bool, amount: Any
-        ) -> Tuple[str, str, str]:
-            m = _parse_map(payload)
-            method = _payment_method_label(m.get("method"))
-            raw_duration = m.get("duration")
-
-            traffic_gb = _parse_traffic_duration(raw_duration)
-            if traffic_gb is not None:
-                return "Трафик", method, f"{traffic_gb} GB"
-
-            white = m.get("white", "False").lower() == "true"
-            gift = bool(is_gift) or m.get("gift", "False").lower() == "true"
-            dur = _payload_duration_to_panel_days(raw_duration)
-            if dur is None:
-                try:
-                    amt_f = float(amount)
-                except (TypeError, ValueError):
-                    amt_f = None
-                if amt_f is not None:
-                    if white:
-                        dur = _white_days_from_amount_fallback(amt_f)
-                    else:
-                        dur = _billing_duration_from_amount_fallback(amt_f)
-
-            if gift and white:
-                label = "Подарок, вайт (mobile)"
-            elif gift:
-                label = "Подарок, обычная"
-            elif white:
-                label = "Вайт (mobile)"
-            else:
-                label = "Обычная"
-
-            days_s = f"{dur} дн." if dur is not None else "—"
-            return label, method, days_s
+        rows_acc: List[Tuple[datetime, str, str, str, int]] = []
 
         async with self.session_factory() as session:
             queries: List[Any] = [
@@ -4421,8 +4534,12 @@ class AsyncSQL:
             ]
             for q in queries:
                 for _uid, tc, amt, pl, ig in (await session.execute(q)).all():
-                    kind, method, detail = _row_report_fields(pl, bool(ig), amt)
-                    rows_acc.append((tc, kind, method, detail))
+                    kind, method, detail = _payment_row_report_fields(pl, bool(ig), amt)
+                    try:
+                        amount_i = int(round(float(amt)))
+                    except (TypeError, ValueError):
+                        amount_i = 0
+                    rows_acc.append((tc, kind, method, detail, amount_i))
 
         rows_acc.sort(key=lambda x: (x[0], x[1]))
         return rows_acc

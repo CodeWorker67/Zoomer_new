@@ -41,7 +41,10 @@ async def cmd_add_wheel(message: Message) -> None:
 
     args = (message.text or "").split()
     if len(args) < 3:
-        await message.answer("❌ Использование: /add_wheel <tg_id> <кол-во attempt>")
+        await message.answer(
+            "❌ Использование: /add_wheel <tg_id> <кол-во attempt>\n"
+            "Отрицательное число уменьшает attempt (не ниже rotation)."
+        )
         return
 
     try:
@@ -54,11 +57,11 @@ async def cmd_add_wheel(message: Message) -> None:
     if target_id == 0:
         await message.answer("❌ tg_id не может быть 0.")
         return
-    if add_count <= 0:
-        await message.answer("❌ Количество attempt должно быть больше 0.")
+    if add_count == 0:
+        await message.answer("❌ Количество attempt не должно быть 0.")
         return
-    if add_count > 1000:
-        await message.answer("❌ Слишком большое значение (максимум 1000 за раз).")
+    if abs(add_count) > 1000:
+        await message.answer("❌ Слишком большое значение (максимум ±1000 за раз).")
         return
 
     if target_id > 0:
@@ -70,12 +73,18 @@ async def cmd_add_wheel(message: Message) -> None:
     rotation = int(row.rotation_number or 0) if row else 0
     active = max(0, total_attempt - rotation)
 
+    if add_count > 0:
+        delta_line = f"Начислено <b>+{add_count}</b> attempt"
+    else:
+        delta_line = f"Списано <b>{-add_count}</b> attempt"
     await message.answer(
-        f"✅ Начислено <b>+{add_count}</b> attempt пользователю <code>{target_id}</code>.\n\n"
+        f"✅ {delta_line} пользователю <code>{target_id}</code>.\n\n"
         f"attempt: <b>{total_attempt}</b>\n"
         f"rotation: <b>{rotation}</b>\n"
         f"активных: <b>{active}</b>",
         parse_mode="HTML",
     )
-    from services.wheel_notify import notify_purchase_wheel_attempts
-    await notify_purchase_wheel_attempts(target_id, add_count)
+    if add_count > 0:
+        from services.wheel_notify import notify_purchase_wheel_attempts
+
+        await notify_purchase_wheel_attempts(target_id, add_count)

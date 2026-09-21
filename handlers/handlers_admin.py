@@ -710,18 +710,20 @@ async def _apply_find_add_traffic(tg_id: int, gb: float) -> tuple[bool, str]:
 
 
 async def _format_devices_for_admin(tg_id: int) -> str:
-    lines: list[str] = []
+    blocks: list[str] = []
     slots = await x3.active_subscription_slots(tg_id)
     if not slots:
         return "нет"
     for _slot_key, label, panel_user_id, _username in slots:
         devices, _total = await x3.get_user_hwid_devices(panel_user_id)
-        if not devices:
-            lines.append(f"{label}: нет устройств")
+        device_dicts = [d for d in devices if isinstance(d, dict)]
+        if not device_dicts:
+            blocks.append(f"{label}: нет устройств")
             continue
-        names = ", ".join(_device_display_name(d) for d in devices if isinstance(d, dict))
-        lines.append(f"{label}: {names}")
-    return "\n".join(lines) if lines else "нет"
+        blocks.append(f"{label}:")
+        for idx, device in enumerate(device_dicts, start=1):
+            blocks.append(f"{idx}. {_device_display_name(device)}")
+    return "\n".join(blocks) if blocks else "нет"
 
 
 async def _build_find_message(
@@ -817,7 +819,8 @@ async def _build_find_message(
         lines.append(f"Ссылка: {sub_url}")
 
     devices_block = await _format_devices_for_admin(target_id)
-    lines.append(f"Устройства: {devices_block}")
+    lines.append("Устройства:")
+    lines.append(devices_block)
 
     trafic_wl, limit_wl = await sql.get_wl_limits(target_id)
     used_wl_gb = await get_wl_used_gb_for_user(x3, target_id, trafic_wl, sql=sql)

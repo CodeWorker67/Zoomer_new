@@ -5,14 +5,23 @@ import hashlib
 import hmac
 import json
 import time
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from urllib.parse import parse_qsl
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
-from config import TG_TOKEN
+from bot import sql
+from config import PAYMENT_MAX_PENDING_PER_USER, TG_TOKEN
+from lexicon import dct_desc, lexicon
+from payments.gift_pricing import gift_rub_amount_and_desc
+from payments.payload_source import MINIAPP
+from payments.pay_platega import PLATEGA_CARD_METHOD, PLATEGA_SBP_METHOD, pay, pay_for_gift
+from payments.tariff_gate import normalize_tariff_duration_key
+from payments.wheel_checkout import apply_admin_test_price, quote_gift, quote_subscription
 from services.wheel import wheel_begin_spin, wheel_complete_spin, wheel_public_state, wheel_recent_wins
+
+_WHEEL_CHECKOUT_DURATIONS = frozenset({"7", "30", "90", "180", "365", "730"})
 
 router = APIRouter(prefix="/api/wheel", tags=["wheel"])
 
@@ -100,3 +109,99 @@ async def wheel_spin_complete(_: Request, auth: WheelUser):
         if str(e) == "invalid_pending_prize":
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Некорректный приз")
         raise
+
+
+class WheelCheckoutQuoteBody(InitDataBody):
+    duration_key: str = Field(..., min_length=1, max_length=16)
+    target: Literal["self", "gift"]
+
+
+class WheelCheckoutCreateBody(WheelCheckoutQuoteBody):
+    payment: Literal["sbp", "card"]
+
+
+def _validate_checkout_duration(duration_key: str) -> str:
+    key = normalize_tariff_duration_key(duration_key.strip())
+    if key not in _WHEEL_CHECKOUT_DURATIONS:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Недоступный тариф")
+    return key
+
+
+async def _wheel_checkout_quote(uid: int, duration_key: str, target: str):
+    desc_key = _validate_checkout_duration(duration_key)
+    if target == "gift":
+        quote = await quote_gift(uid, desc_key)
+    else:
+        quote = await quote_subscription(uid, desc_key)
+    return desc_key, apply_admin_test_price(uid, quote)
+
+
+@router.post("/checkout/quote")
+async def wheel_checkout_quote(_: Request, body: WheelCheckoutQuoteBody, auth: WheelUser):
+    uid = int(auth["user_id"])
+    desc_key, quote = await _wheel_checkout_quote(uid, body.duration_key, body.target)
+    return {
+        "duration_key": desc_key,
+        "target": body.target,
+        "base_rub": quote.base_rub,
+        "final_rub": quote.final_rub,
+        "discount_percent": quote.percent,
+    }
+
+
+@router.post("/checkout/create")
+async def wheel_checkout_create(_: Request, body: WheelCheckoutCreateBody, auth: WheelUser):
+    uid = int(auth["user_id"])
+    tg_user = auth.get("user") or {}
+    desc_key, quote = await _wheel_checkout_quote(uid, body.duration_key, body.target)
+    rub_amount = quote.final_rub
+    suffix = quote.payload_suffix
+    duration = normalize_tariff_duration_key(desc_key)
+    user_id = str(uid)
+    tg_uname = tg_user.get("username")
+    payment_method = PLATEGA_SBP_METHOD if body.payment == "sbp" else PLATEGA_CARD_METHOD
+
+    if body.target == "gift":
+        _, gift_des = await gift_rub_amount_and_desc(sql, uid, desc_key)
+        payment_info = await pay_for_gift(
+            val=str(rub_amount),
+            des=gift_des,
+            user_id=user_id,
+            duration=duration,
+            white=False,
+            payment_method=payment_method,
+            telegram_username=tg_uname,
+            source=MINIAPP,
+            payload_suffix=suffix,
+        )
+    else:
+        payment_info = await pay(
+            val=str(rub_amount),
+            des=dct_desc[desc_key],
+            user_id=user_id,
+            duration=duration,
+            white=False,
+            payment_method=payment_method,
+            telegram_username=tg_uname,
+            source=MINIAPP,
+            payload_suffix=suffix,
+        )
+
+    status_val = payment_info.get("status") or "error"
+    if status_val == "rate_limited":
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            lexicon["payment_too_many_pending"].format(PAYMENT_MAX_PENDING_PER_USER),
+        )
+    if status_val != "pending" or not payment_info.get("url"):
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Не удалось создать платёж")
+
+    return {
+        "status": "pending",
+        "amount_rub": rub_amount,
+        "payment_url": payment_info["url"],
+        "payment_id": payment_info.get("id") or "",
+        "target": body.target,
+        "duration_key": desc_key,
+        "payment": body.payment,
+    }

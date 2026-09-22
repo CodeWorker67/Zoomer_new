@@ -3,3 +3,4 @@
 BOT = "bot"
 SITE = "site"
 SUBPAGE = "subpage"
+MINIAPP = "miniapp"

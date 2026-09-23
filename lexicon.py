@@ -847,11 +847,13 @@ def tickets_word(n: int) -> str:
 
 
 def mask_raffle_fullname(fullname: str | None) -> str:
+    """Маска имени фиксированной ширины (8) для выравнивания колонок в <code>."""
     name = (fullname or '').strip()
     if not name:
-        return '*****'
+        return '*****'.ljust(8)
+    lead = next((c for c in name if c.isalnum()), '*')
     stars = min(max(len(name) - 1, 0), 7)
-    return f'{name[0]}{"*" * stars}'
+    return f'{lead}{"*" * stars}'.ljust(8)[:8]
 
 
 def raffle_top_caption(
@@ -872,12 +874,11 @@ def raffle_top_caption(
         return '\n'.join(lines)
     for i, (_user_id, count, fullname) in enumerate(rows, start=1):
         emoji = _RAFFLE_TOP_PLACE_EMOJI[i] if i < len(_RAFFLE_TOP_PLACE_EMOJI) else '🎟'
-        place = f'{i} место'.ljust(8)
-        masked = mask_raffle_fullname(fullname).ljust(8)
+        place = f'{i:>2} место'
+        masked = mask_raffle_fullname(fullname)
         tickets = str(count).rjust(4)
-        lines.append(
-            f'{emoji} <code>{escape(place)} - {escape(masked)} - {escape(tickets)}</code>'
-        )
+        row = f'{place} - {masked} - {tickets}'
+        lines.append(f'{emoji} <code>{escape(row)}</code>')
     return '\n'.join(lines)
 
 

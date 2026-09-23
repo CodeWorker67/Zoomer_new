@@ -969,6 +969,20 @@ class AsyncSQL:
             await session.commit()
             return True
 
+    async def set_user_stamp_by_tg_id(self, tg_user_id: int, stamp: str) -> bool:
+        """Обновляет stamp Telegram-пользователя, если пусто или 'email'."""
+        async with self.session_factory() as session:
+            result = await session.execute(select(Users).where(Users.user_id == tg_user_id))
+            user = result.scalar_one_or_none()
+            if user is None:
+                return False
+            current = (user.stamp or "").strip()
+            if current and current != "email":
+                return False
+            user.stamp = stamp
+            await session.commit()
+            return True
+
     async def set_landing_password_by_internal_id(self, internal_id: int, password_hash: str) -> bool:
         async with self.session_factory() as session:
             user = await session.get(Users, internal_id)

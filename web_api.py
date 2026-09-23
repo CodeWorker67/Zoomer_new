@@ -435,6 +435,7 @@ class TelegramAuthIn(BaseModel):
     username: Optional[str] = None
     photo_url: Optional[str] = None
     partner: Optional[str] = None
+    stamp: Optional[str] = None
 
 
 class BotLoginIn(BaseModel):
@@ -573,6 +574,13 @@ def _normalize_stamp(raw: Optional[str]) -> str:
     if _STAMP_RE.fullmatch(s):
         return s
     return "email"
+
+
+async def _apply_site_stamp_to_tg_user(tg_user_id: int, stamp_raw: Optional[str]) -> None:
+    stamp = _normalize_stamp(stamp_raw)
+    if stamp == "email":
+        return
+    await sql.set_user_stamp_by_tg_id(tg_user_id, stamp)
 
 
 class RegisterIn(BaseModel):
@@ -742,10 +750,11 @@ async def auth_bot_login(body: BotLoginIn, request: Request):
 @app.post("/api/auth/telegram")
 async def auth_telegram(body: TelegramAuthIn, request: Request):
     partner_raw = body.partner
-    data = body.model_dump(exclude_none=True, exclude={"partner"})
+    data = body.model_dump(exclude_none=True, exclude={"partner", "stamp"})
     _verify_telegram_login(data)
     uid = int(body.id)
     await sql.ensure_telegram_user_with_partner(uid, partner_raw)
+    await _apply_site_stamp_to_tg_user(uid, body.stamp)
 
     secret = _require_jwt_secret()
     exp = datetime.now(timezone.utc) + timedelta(hours=24)

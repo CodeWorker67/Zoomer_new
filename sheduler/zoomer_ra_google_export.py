@@ -5,21 +5,18 @@ import asyncio
 import os
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 from sqlalchemy import func, select
 
 from config import GOOGLE_PATH_ZOOMER_RA, GOOGLE_SERVICE_ACCOUNT_FILE
 from config_bd.models import AsyncSessionLocal, Users
-from handlers.handlers_statistic import _load_all_successful_payments
 from logging_config import logger
 
 _SHEET_HEADERS = [
     "ключ",
     "пользователи",
     "оплатившие",
-    "оплаты",
     "действующие триалы",
     "действующие триалы, которые подключили впн",
     "все триалы",
@@ -38,20 +35,10 @@ def _spreadsheet_id_from_env(value: str) -> str:
 class _StampAgg:
     users: int = 0
     paid_users: int = 0
-    first_payments_sum: int = 0
     active_trials: int = 0
     active_trials_connect: int = 0
     all_trials: int = 0
     all_trials_connect: int = 0
-
-
-def _first_payment_rub_by_user(all_payments) -> Dict[int, Tuple[int, datetime]]:
-    best: Dict[int, Tuple[int, datetime]] = {}
-    for p in all_payments:
-        prev = best.get(p.user_id)
-        if prev is None or p.time_created < prev[1]:
-            best[p.user_id] = (p.amount_rub, p.time_created)
-    return {uid: (amt, tc) for uid, (amt, tc) in best.items()}
 
 
 async def _collect_stamp_rows() -> List[List]:
@@ -68,11 +55,9 @@ async def _collect_stamp_rows() -> List[List]:
             func.strpos(func.lower(Users.stamp), "ra_") > 0,
         )
         rows = (await session.execute(stmt)).all()
-        all_payments = await _load_all_successful_payments(session)
-    first_pay = _first_payment_rub_by_user(all_payments)
 
     by_stamp: Dict[str, _StampAgg] = defaultdict(_StampAgg)
-    for user_id, stamp, reserve_field, in_panel, is_connect in rows:
+    for _user_id, stamp, reserve_field, in_panel, is_connect in rows:
         key = (stamp or "").strip()
         if not key or "ra_" not in key.lower():
             continue
@@ -80,9 +65,6 @@ async def _collect_stamp_rows() -> List[List]:
         agg.users += 1
         if reserve_field:
             agg.paid_users += 1
-        fp = first_pay.get(user_id)
-        if fp is not None:
-            agg.first_payments_sum += fp[0]
 
         if in_panel:
             agg.all_trials += 1
@@ -102,7 +84,6 @@ async def _collect_stamp_rows() -> List[List]:
                 stamp,
                 a.users,
                 a.paid_users,
-                a.first_payments_sum,
                 a.active_trials,
                 a.active_trials_connect,
                 a.all_trials,

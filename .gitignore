@@ -5,6 +5,7 @@ __pycache__/
 test.py
 sqlite3.db
 export.xlsx
+google_key.json
 # C extensions
 *.so
 creds.json

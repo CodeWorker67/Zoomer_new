@@ -48,6 +48,14 @@ PUBLIC_SITE_URL: str = (os.environ.get("PUBLIC_SITE_URL") or "").strip().rstrip(
 
 JWT_SECRET: Optional[str] = os.environ.get("JWT_SECRET")
 GOOGLE_CLIENT_ID: Optional[str] = os.environ.get("GOOGLE_CLIENT_ID")
+# Google Sheets: выгрузка статистики по меткам RA_ (spreadsheet id или URL)
+GOOGLE_PATH_ZOOMER_RA: Optional[str] = (
+    os.environ.get("GOOGLE_PATH_ZOOMER_RA") or ""
+).strip() or None
+_GOOGLE_KEY_DEFAULT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "google_key.json")
+GOOGLE_SERVICE_ACCOUNT_FILE: str = (
+    os.environ.get("GOOGLE_SERVICE_ACCOUNT_FILE") or _GOOGLE_KEY_DEFAULT
+).strip()
 LANDING_GOOGLE_CLIENT_ID: Optional[str] = (
     os.environ.get("LANDING_GOOGLE_CLIENT_ID") or os.environ.get("GOOGLE_CLIENT_ID")
 )

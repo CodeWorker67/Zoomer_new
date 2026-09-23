@@ -1,4 +1,6 @@
 import asyncio
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import uvicorn
 from aiogram import Bot, Dispatcher
@@ -45,6 +47,7 @@ from sheduler.time_mes import send_message_cron
 from logging_config import logger
 from sheduler.time_mes_not_sub import send_push_cron
 from sheduler.pg_dump_backup import pg_dump_backup_cron
+from sheduler.zoomer_ra_google_export import export_zoomer_ra_google_cron
 from web_api import app as web_app
 from config_bd.migrate_users_wl_fields import migrate as migrate_wl_fields
 from config_bd.migrate_wl_traffic_meta import migrate as migrate_wl_traffic_meta
@@ -144,6 +147,16 @@ async def main() -> None:
         trigger='interval',
         minutes=127,
         id='wheel_fake_recent_win',
+        misfire_grace_time=600,
+        max_instances=1,
+    )
+    _msk = ZoneInfo("Europe/Moscow")
+    scheduler.add_job(
+        export_zoomer_ra_google_cron,
+        trigger='interval',
+        hours=1,
+        next_run_time=datetime.now(_msk) + timedelta(seconds=30),
+        id='zoomer_ra_google_export',
         misfire_grace_time=600,
         max_instances=1,
     )

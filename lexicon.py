@@ -1,3 +1,5 @@
+import re
+
 from config import SUPPORT_URL
 
 lexicon = {
@@ -833,6 +835,11 @@ _RAFFLE_TOP_PLACE_EMOJI = (
     '🔟',
 )
 
+_RAFFLE_TOP_NAME_WIDTH = 8
+_RAFFLE_TOP_TICKETS_WIDTH = 4
+_RAFFLE_INVISIBLE_CHARS = frozenset('\ufeff\u200b\u200c\u200d\u2060\u180e\ufffe')
+_RAFFLE_LEAD_CHAR = re.compile(r'[A-Za-z0-9А-Яа-яЁё]')
+
 
 def tickets_word(n: int) -> str:
     abs_n = abs(int(n)) % 100
@@ -846,14 +853,20 @@ def tickets_word(n: int) -> str:
     return 'билетов'
 
 
-def mask_raffle_fullname(fullname: str | None) -> str:
-    """Маска имени фиксированной ширины (8) для выравнивания колонок в <code>."""
+def _normalize_raffle_fullname(fullname: str | None) -> str:
     name = (fullname or '').strip()
+    return ''.join(c for c in name if c not in _RAFFLE_INVISIBLE_CHARS).strip()
+
+
+def mask_raffle_fullname(fullname: str | None) -> str:
+    """Маска имени фиксированной ширины для колонки в моноширинном топе."""
+    name = _normalize_raffle_fullname(fullname)
+    width = _RAFFLE_TOP_NAME_WIDTH
     if not name:
-        return '*****'.ljust(8)
-    lead = next((c for c in name if c.isalnum()), '*')
-    stars = min(max(len(name) - 1, 0), 7)
-    return f'{lead}{"*" * stars}'.ljust(8)[:8]
+        return '*' * width
+    match = _RAFFLE_LEAD_CHAR.search(name)
+    lead = match.group(0) if match else '*'
+    return f'{lead}{"*" * (width - 1)}'
 
 
 def raffle_top_caption(
@@ -872,13 +885,17 @@ def raffle_top_caption(
     if not rows:
         lines.append('Пока здесь пусто — билетики появятся после покупок и подарков 🎟')
         return '\n'.join(lines)
+    table: list[str] = []
     for i, (_user_id, count, fullname) in enumerate(rows, start=1):
         emoji = _RAFFLE_TOP_PLACE_EMOJI[i] if i < len(_RAFFLE_TOP_PLACE_EMOJI) else '🎟'
-        place = f'{i:>2} место'
+        rank = f'{i:>2}'
         masked = mask_raffle_fullname(fullname)
-        tickets = str(count).rjust(4)
-        row = f'{place} - {masked} - {tickets}'
-        lines.append(f'{emoji} <code>{escape(row)}</code>')
+        tickets = str(count).rjust(_RAFFLE_TOP_TICKETS_WIDTH)
+        body = f'{rank} место - {masked} - {tickets}'
+        # Один пробел после эмодзи: для 1–9 он же выравнивает «  N место», для 10 — отделяет 🔟 от «10».
+        line = f'{emoji}{body}' if i < 10 else f'{emoji} {body}'
+        table.append(line)
+    lines.append(f'<pre>{escape(chr(10).join(table))}</pre>')
     return '\n'.join(lines)
 
 

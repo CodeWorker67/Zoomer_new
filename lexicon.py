@@ -832,7 +832,7 @@ _RAFFLE_TOP_PLACE_EMOJI = (
     '7️⃣',
     '8️⃣',
     '9️⃣',
-    '⑩',
+    '🔟'
 )
 
 _RAFFLE_TOP_NAME_WIDTH = 8
@@ -891,7 +891,10 @@ def raffle_top_caption(
         masked = mask_raffle_fullname(fullname)
         tickets = str(count).rjust(_RAFFLE_TOP_TICKETS_WIDTH)
         body = f'{rank} место - {masked} - {tickets}'
-        lines.append(f'{emoji}<code>{escape(body)}</code>')
+        if i == 10:
+            lines.append(f'<code>{escape(emoji + body)}</code>')
+        else:
+            lines.append(f'{emoji}<code>{escape(body)}</code>')
     return '\n'.join(lines)
 
 

@@ -18,6 +18,7 @@ from logging_config import logger
 _SHEET_HEADERS = [
     "ключ",
     "пользователи",
+    "оплатившие",
     "оплаты",
     "действующие триалы",
     "действующие триалы, которые подключили впн",
@@ -36,6 +37,7 @@ def _spreadsheet_id_from_env(value: str) -> str:
 @dataclass
 class _StampAgg:
     users: int = 0
+    paid_users: int = 0
     first_payments_sum: int = 0
     active_trials: int = 0
     active_trials_connect: int = 0
@@ -76,6 +78,8 @@ async def _collect_stamp_rows() -> List[List]:
             continue
         agg = by_stamp[key]
         agg.users += 1
+        if reserve_field:
+            agg.paid_users += 1
         fp = first_pay.get(user_id)
         if fp is not None:
             agg.first_payments_sum += fp[0]
@@ -97,6 +101,7 @@ async def _collect_stamp_rows() -> List[List]:
             [
                 stamp,
                 a.users,
+                a.paid_users,
                 a.first_payments_sum,
                 a.active_trials,
                 a.active_trials_connect,

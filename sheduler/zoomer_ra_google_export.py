@@ -5,9 +5,10 @@ import asyncio
 import os
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Dict, List, Tuple
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from config import GOOGLE_PATH_ZOOMER_RA, GOOGLE_SERVICE_ACCOUNT_FILE
 from config_bd.models import AsyncSessionLocal, Users
@@ -61,7 +62,8 @@ async def _collect_stamp_rows() -> List[List]:
             Users.is_connect,
         ).where(
             Users.is_delete == False,
-            Users.stamp.ilike("%ra_%"),
+            # В ILIKE «_» — один любой символ; нужна подстрока «ra_», не «ra» + символ.
+            func.strpos(func.lower(Users.stamp), "ra_") > 0,
         )
         rows = (await session.execute(stmt)).all()
         all_payments = await _load_all_successful_payments(session)
@@ -70,7 +72,7 @@ async def _collect_stamp_rows() -> List[List]:
     by_stamp: Dict[str, _StampAgg] = defaultdict(_StampAgg)
     for user_id, stamp, reserve_field, in_panel, is_connect in rows:
         key = (stamp or "").strip()
-        if not key:
+        if not key or "ra_" not in key.lower():
             continue
         agg = by_stamp[key]
         agg.users += 1

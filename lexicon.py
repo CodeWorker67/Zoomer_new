@@ -832,7 +832,7 @@ _RAFFLE_TOP_PLACE_EMOJI = (
     '7️⃣',
     '8️⃣',
     '9️⃣',
-    '🔟',
+    '⑩',
 )
 
 _RAFFLE_TOP_NAME_WIDTH = 8
@@ -885,17 +885,13 @@ def raffle_top_caption(
     if not rows:
         lines.append('Пока здесь пусто — билетики появятся после покупок и подарков 🎟')
         return '\n'.join(lines)
-    table: list[str] = []
     for i, (_user_id, count, fullname) in enumerate(rows, start=1):
         emoji = _RAFFLE_TOP_PLACE_EMOJI[i] if i < len(_RAFFLE_TOP_PLACE_EMOJI) else '🎟'
         rank = f'{i:>2}'
         masked = mask_raffle_fullname(fullname)
         tickets = str(count).rjust(_RAFFLE_TOP_TICKETS_WIDTH)
         body = f'{rank} место - {masked} - {tickets}'
-        # Один пробел после эмодзи: для 1–9 он же выравнивает «  N место», для 10 — отделяет 🔟 от «10».
-        line = f'{emoji}{body}' if i < 10 else f'{emoji} {body}'
-        table.append(line)
-    lines.append(f'<pre>{escape(chr(10).join(table))}</pre>')
+        lines.append(f'{emoji}<code>{escape(body)}</code>')
     return '\n'.join(lines)
 
 

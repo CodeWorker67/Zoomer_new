@@ -3233,15 +3233,25 @@ class AsyncSQL:
             'all_users'
         ]
 
-    @staticmethod
-    def _old_inactive_users_criteria(cutoff: datetime):
+    def _users_with_any_successful_payment_subquery(self):
+        """user_id с хотя бы одной успешной оплатой (confirmed/paid) в любой платёжной таблице."""
+        parts = [
+            select(model.user_id).where(model.status.in_(_BILLING_OK_STATUSES))
+            for model in _MERGE_PAYMENT_MODELS
+        ]
+        union_stmt = parts[0].union(*parts[1:])
+        return union_stmt.subquery()
+
+    def _old_inactive_users_criteria(self, cutoff: datetime):
         """Не брал ключ, не подключался, не платил, без subscription_end_date, регистрация до cutoff."""
+        paid_subq = self._users_with_any_successful_payment_subquery()
         return and_(
             Users.in_panel.is_(False),
             Users.is_connect.is_(False),
             Users.reserve_field.is_(False),
             Users.subscription_end_date.is_(None),
             Users.create_user < cutoff,
+            Users.user_id.notin_(paid_subq),
         )
 
     async def count_users_by_stamp(self, stamp: str) -> int:
@@ -3276,20 +3286,29 @@ class AsyncSQL:
             result = await session.execute(stmt)
             return [int(row[0]) for row in result.all()]
 
+    async def delete_users_from_db_by_ids(self, user_ids: List[int]) -> int:
+        """Удаляет записи users пакетами; first_site — явно, second_site — CASCADE. Возвращает число удалённых users."""
+        if not user_ids:
+            return 0
+        uniq = list({int(u) for u in user_ids})
+        deleted = 0
+        chunks = [uniq[i : i + _STAT_IN_CHUNK] for i in range(0, len(uniq), _STAT_IN_CHUNK)]
+        async with self.session_factory() as session:
+            for chunk in chunks:
+                await session.execute(delete(FirstSite).where(FirstSite.tg_id.in_(chunk)))
+                result = await session.execute(delete(Users).where(Users.user_id.in_(chunk)))
+                deleted += int(result.rowcount or 0)
+            await session.commit()
+        logger.info("bulk delete users: requested={} deleted={}", len(uniq), deleted)
+        return deleted
+
     async def delete_from_db(self, user_id: int) -> bool:
         """Полностью удаляет пользователя из БД по user_id."""
-        async with self.session_factory() as session:
-            stmt = select(Users).where(Users.user_id == user_id)
-            result = await session.execute(stmt)
-            user = result.scalar_one_or_none()
-            if not user:
-                logger.warning(f"User {user_id} not found for deletion")
-                return False
-            await session.execute(delete(FirstSite).where(FirstSite.tg_id == user_id))
-            await session.delete(user)
-            await session.commit()
-            logger.info(f"✅ Удалено пользователей: 1 (User_id: {user_id})")
-            return True
+        deleted = await self.delete_users_from_db_by_ids([user_id])
+        if deleted < 1:
+            logger.warning(f"User {user_id} not found for deletion")
+            return False
+        return True
 
     async def reset_all_delete_flag(self) -> int:
         """Устанавливает Is_delete = False для всех записей в таблице users."""

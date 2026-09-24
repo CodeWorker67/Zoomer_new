@@ -46,7 +46,6 @@ from handlers.handlers_devices import _device_display_name
 _ADD_TRAFFIC_ALL_PROGRESS_EVERY = 100
 _USER_TUPLE_FIELD_BOOL_2 = 20
 _OLD_INACTIVE_DAYS = 30
-_ADMIN_BULK_DELETE_PROGRESS_EVERY = 200
 _admin_bulk_delete_pending: Dict[str, Dict[str, Any]] = {}
 
 _ADD_7_MAY_GIFT_HTML = (
@@ -1351,27 +1350,13 @@ async def _run_admin_bulk_delete(
         await bot.send_message(admin_chat_id, f"ℹ️ {title}\nНет пользователей для удаления.")
         return
 
-    deleted = 0
-    failed = 0
-    for idx, uid in enumerate(user_ids, start=1):
-        if await sql.delete_from_db(uid):
-            deleted += 1
-        else:
-            failed += 1
-        if idx % _ADMIN_BULK_DELETE_PROGRESS_EVERY == 0:
-            try:
-                await bot.send_message(
-                    admin_chat_id,
-                    f"⏳ {title}\nУдалено {idx} / {total}…",
-                )
-            except Exception as notify_err:
-                logger.warning("bulk delete progress notify failed: {}", notify_err)
-
+    deleted = await sql.delete_users_from_db_by_ids(user_ids)
+    failed = max(0, total - deleted)
     report = (
         f"✅ <b>{title}</b>\n\n"
         f"• В выборке: <b>{total}</b>\n"
         f"• Удалено из БД бота: <b>{deleted}</b>\n"
-        f"• Ошибок: <b>{failed}</b>\n\n"
+        f"• Не удалено: <b>{failed}</b>\n\n"
         f"⚠️ Записи в панели X3 не затронуты."
     )
     await bot.send_message(admin_chat_id, report, parse_mode="HTML")
@@ -1431,7 +1416,8 @@ async def delete_old_command(message: Message):
     cutoff_label = cutoff.astimezone(_MSK).strftime("%d.%m.%Y %H:%M МСК")
     criteria = (
         "in_panel = False, is_connect = False, reserve_field = False, "
-        "subscription_end_date IS NULL, create_user раньше cutoff"
+        "subscription_end_date IS NULL, нет успешных оплат в БД, "
+        "create_user раньше cutoff"
     )
 
     if count == 0:

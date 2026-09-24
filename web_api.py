@@ -42,9 +42,11 @@ from logging_config import logger
 from payments.payload_source import SITE, SUBPAGE
 from payments.pay_cryptobot import create_cryptobot_payment
 from payments.pay_platega import pay_site_card, pay_site_sbp
+from payments.wheel_checkout import apply_admin_test_price, quote_traffic
 from services.unisender import is_configured as unisender_configured
 from services.unisender import send_email as send_unisender_email
 from payments.pay_stars import get_stars_amount
+from wl_traffic.constants import WL_TRAFFIC_TARIFFS
 from wl_traffic.service import get_wl_used_gb_for_user
 import aiohttp
 
@@ -352,6 +354,13 @@ def _payload_tg_id_from_user_row(row) -> int:
     return int(row[1])
 
 
+async def _billing_user_id_from_ctx(ctx: dict[str, Any]) -> int:
+    row = await _user_row_from_jwt(ctx)
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+    return int(row[1])
+
+
 async def resolve_telegram_user_id(ctx: dict[str, Any]) -> int:
     row = await _user_row_from_jwt(ctx)
     if row is None:
@@ -447,6 +456,11 @@ class CreatePaymentIn(BaseModel):
     tariff_id: str
     method: Literal["sbp", "card"]
     is_gift: bool = False
+
+
+class CreateTrafficPaymentIn(BaseModel):
+    gb: str = Field(..., description="Размер пакета в GB (ключ из WL_TRAFFIC_TARIFFS)")
+    method: Literal["sbp", "card"]
 
 
 SubPageDuration = Literal["7", "30", "90", "180", "365", "5000"]
@@ -873,6 +887,31 @@ async def config_tariffs():
     return out
 
 
+@app.get("/api/config/traffic-packages")
+async def config_traffic_packages():
+    """Пакеты доп. трафика (от большего GB к меньшему)."""
+    out: list[dict[str, Any]] = []
+    for gb, price in WL_TRAFFIC_TARIFFS.items():
+        out.append({"gb": gb, "price": price})
+    return out
+
+
+@app.get("/api/user/wl-traffic")
+async def user_wl_traffic(ctx: JwtCtx):
+    billing_uid = await _billing_user_id_from_ctx(ctx)
+    trafic_wl, limit_wl = await sql.get_wl_limits(billing_uid)
+    used_gb = await get_wl_used_gb_for_user(x3, billing_uid, trafic_wl, sql=sql)
+    limit_gb = round(float(limit_wl or 0.0), 2)
+    used_gb = round(float(used_gb or 0.0), 2)
+    remaining_gb = max(0.0, round(limit_gb - used_gb, 2))
+    return {
+        "limit_gb": limit_gb,
+        "used_gb": used_gb,
+        "remaining_gb": remaining_gb,
+        "limit_exhausted": limit_gb > 0 and used_gb >= limit_gb,
+    }
+
+
 @app.post("/api/trial/activate")
 async def trial_activate(ctx: JwtCtx):
     if ctx.get("auth") == "email":
@@ -1009,6 +1048,76 @@ async def payments_create(ctx: JwtCtx, body: CreatePaymentIn):
             duration=duration_str,
             white=white,
             is_gift=body.is_gift,
+            telegram_username=site_uname,
+            payload_source=SITE,
+        )
+
+    if result["status"] == "rate_limited":
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            lexicon["payment_too_many_pending"].format(PAYMENT_MAX_PENDING_PER_USER),
+        )
+    if result["status"] != "pending":
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Не удалось создать платёж")
+
+    return {
+        "payment_url": result.get("url") or "",
+        "payment_id": result.get("id") or "",
+    }
+
+
+@app.post("/api/payments/create-traffic")
+async def payments_create_traffic(ctx: JwtCtx, body: CreateTrafficPaymentIn):
+    row = await _user_row_from_jwt(ctx)
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+    billing_user_id = int(row[1])
+    payload_uid = _payload_tg_id_from_user_row(row)
+    if payload_uid <= 0:
+        em = row[15] or ctx.get("username")
+        if not em:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Нет email в профиле")
+    payload_user = str(payload_uid)
+
+    gb = body.gb.strip()
+    if gb not in WL_TRAFFIC_TARIFFS:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown traffic package")
+
+    quote = await quote_traffic(billing_user_id, gb)
+    quote = apply_admin_test_price(billing_user_id, quote)
+    price = quote.final_rub
+    duration = f"traffic{gb}"
+    description = f"Пакет трафика {gb} GB"
+
+    site_uname = ctx.get("username")
+    if not isinstance(site_uname, str):
+        site_uname = None
+
+    if body.method == "card":
+        if not PLATEGA_API_KEY or not PLATEGA_MERCHANT_ID:
+            raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Platega is not configured")
+        result = await pay_site_card(
+            val=str(price),
+            des=description,
+            payload_user=payload_user,
+            billing_user_id=billing_user_id,
+            duration=duration,
+            white=False,
+            is_gift=False,
+            telegram_username=site_uname,
+            payload_source=SITE,
+        )
+    else:
+        if not PLATEGA_API_KEY or not PLATEGA_MERCHANT_ID:
+            raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Platega is not configured")
+        result = await pay_site_sbp(
+            val=str(price),
+            des=description,
+            payload_user=payload_user,
+            billing_user_id=billing_user_id,
+            duration=duration,
+            white=False,
+            is_gift=False,
             telegram_username=site_uname,
             payload_source=SITE,
         )

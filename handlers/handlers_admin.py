@@ -1,9 +1,10 @@
 import random
 import os
+import secrets
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime, date, timezone, timedelta
-from typing import List, Optional
+from typing import Dict, List, Optional, Any
 
 import openpyxl
 from openpyxl.styles import Alignment, Border, Side, PatternFill
@@ -17,8 +18,6 @@ from X3 import panel_username_for_site_user
 from keyboard import (
     BTN_BACK,
     create_kb,
-    STYLE_PRIMARY,
-    STYLE_DANGER,
     keyboard_sub_after_buy,
 )
 from lexicon import lexicon
@@ -46,6 +45,9 @@ from handlers.handlers_devices import _device_display_name
 
 _ADD_TRAFFIC_ALL_PROGRESS_EVERY = 100
 _USER_TUPLE_FIELD_BOOL_2 = 20
+_OLD_INACTIVE_DAYS = 30
+_ADMIN_BULK_DELETE_PROGRESS_EVERY = 200
+_admin_bulk_delete_pending: Dict[str, Dict[str, Any]] = {}
 
 _ADD_7_MAY_GIFT_HTML = (
     "🎁 <b>Сюрприз от Zoomer VPN</b>\n\n"
@@ -231,10 +233,6 @@ async def _refresh_find_message(
         disable_web_page_preview=True,
     )
 
-
-_DELETE_STAMPS = ("nnnn", "premium")
-_DEL_STAMPS_YES_CB = "del_stamps_yes"
-_DEL_STAMPS_NO_CB = "del_stamps_no"
 
 _ADD7WHITE_CB = "add7white_start"
 _ADD7REG_CB = "add7regular_start"
@@ -1301,208 +1299,228 @@ async def delete_user_command(message: Message):
         await message.answer(f"❌ Произошла ошибка при выполнении команды: {str(e)}")
 
 
-def _delete_stamps_preview_text(rows: list[dict]) -> str:
-    counts: dict[str, int] = {}
-    for row in rows:
-        stamp = row.get("stamp") or ""
-        counts[stamp] = counts.get(stamp, 0) + 1
-    lines = [
-        "⚠️ <b>Удаление пользователей из БД</b>",
-        "",
-        "Stamp: <code>nnnn</code>, <code>premium</code>",
-        "",
-    ]
-    for stamp in _DELETE_STAMPS:
-        lines.append(f"• stamp=<code>{stamp}</code>: <b>{counts.get(stamp, 0)}</b>")
-    extra = [s for s in counts if s not in _DELETE_STAMPS]
-    for stamp in extra:
-        lines.append(f"• stamp=<code>{stamp}</code>: <b>{counts[stamp]}</b>")
-    lines.extend(
-        [
-            "",
-            f"Всего к удалению: <b>{len(rows)}</b>",
-            "",
-            "Удаление только из базы бота. Подписки в панели X3 не трогаются.",
-        ]
-    )
-    return "\n".join(lines)
-
-
-def _delete_stamps_confirm_kb() -> InlineKeyboardMarkup:
+def _admin_bulk_delete_confirm_kb(kind: str, token: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="✅ Да, удалить",
-                    callback_data=_DEL_STAMPS_YES_CB,
-                    style=STYLE_DANGER,
+                    text="✅ Да",
+                    callback_data=f"adm_del:{kind}:y:{token}",
                 ),
                 InlineKeyboardButton(
                     text="❌ Нет",
-                    callback_data=_DEL_STAMPS_NO_CB,
-                    style=STYLE_PRIMARY,
+                    callback_data=f"adm_del:{kind}:n:{token}",
                 ),
-            ]
+            ],
         ]
     )
 
 
-def _excel_dt(value) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, datetime):
-        return value.strftime("%Y-%m-%d %H:%M:%S")
-    return str(value)
+def _register_admin_bulk_delete_pending(
+    admin_id: int,
+    kind: str,
+    *,
+    stamp: str = "",
+    cutoff_iso: str = "",
+) -> str:
+    token = secrets.token_hex(4)
+    _admin_bulk_delete_pending[token] = {
+        "admin_id": admin_id,
+        "kind": kind,
+        "stamp": stamp,
+        "cutoff_iso": cutoff_iso,
+    }
+    return token
 
 
-def _build_delete_stamps_xlsx(rows: list[dict]) -> str:
-    header_alignment = Alignment(horizontal="center", vertical="center")
-    thin_border = Border(
-        left=Side(style="thin"),
-        right=Side(style="thin"),
-        top=Side(style="thin"),
-        bottom=Side(style="thin"),
+def _pop_admin_bulk_delete_pending(token: str, admin_id: int) -> Optional[Dict[str, Any]]:
+    data = _admin_bulk_delete_pending.pop(token, None)
+    if data is None or data.get("admin_id") != admin_id:
+        return None
+    return data
+
+
+async def _run_admin_bulk_delete(
+    admin_chat_id: int,
+    user_ids: List[int],
+    *,
+    title: str,
+) -> None:
+    total = len(user_ids)
+    if total == 0:
+        await bot.send_message(admin_chat_id, f"ℹ️ {title}\nНет пользователей для удаления.")
+        return
+
+    deleted = 0
+    failed = 0
+    for idx, uid in enumerate(user_ids, start=1):
+        if await sql.delete_from_db(uid):
+            deleted += 1
+        else:
+            failed += 1
+        if idx % _ADMIN_BULK_DELETE_PROGRESS_EVERY == 0:
+            try:
+                await bot.send_message(
+                    admin_chat_id,
+                    f"⏳ {title}\nУдалено {idx} / {total}…",
+                )
+            except Exception as notify_err:
+                logger.warning("bulk delete progress notify failed: {}", notify_err)
+
+    report = (
+        f"✅ <b>{title}</b>\n\n"
+        f"• В выборке: <b>{total}</b>\n"
+        f"• Удалено из БД бота: <b>{deleted}</b>\n"
+        f"• Ошибок: <b>{failed}</b>\n\n"
+        f"⚠️ Записи в панели X3 не затронуты."
     )
-    columns = [
-        "id",
-        "user_id",
-        "stamp",
-        "email",
-        "ref",
-        "partner",
-        "create_user",
-        "subscription_end_date",
-        "in_panel",
-        "is_connect",
-        "is_delete",
-    ]
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "deleted_users"
-    for col_num, title in enumerate(columns, 1):
-        cell = ws.cell(row=1, column=col_num, value=title)
-        cell.alignment = header_alignment
-        cell.border = thin_border
-    for row_num, row in enumerate(rows, 2):
-        values = [
-            row.get("id"),
-            row.get("user_id"),
-            row.get("stamp"),
-            row.get("email") or "",
-            row.get("ref") or "",
-            row.get("partner") or "",
-            _excel_dt(row.get("create_user")),
-            _excel_dt(row.get("subscription_end_date")),
-            row.get("in_panel"),
-            row.get("is_connect"),
-            row.get("is_delete"),
-        ]
-        for col_num, value in enumerate(values, 1):
-            cell = ws.cell(row=row_num, column=col_num, value=value)
-            cell.border = thin_border
-    for col in ws.columns:
-        max_len = 0
-        col_letter = col[0].column_letter
-        for cell in col:
-            if cell.value is not None:
-                max_len = max(max_len, len(str(cell.value)))
-        ws.column_dimensions[col_letter].width = min(max_len + 2, _EXCEL_COL_WIDTH_MAX)
-    export_path = tempfile.mktemp(suffix=".xlsx")
-    wb.save(export_path)
-    return export_path
+    await bot.send_message(admin_chat_id, report, parse_mode="HTML")
 
 
-async def _send_delete_stamps_report(chat_id: int, rows: list[dict]) -> None:
-    counts: dict[str, int] = {}
-    for row in rows:
-        stamp = row.get("stamp") or ""
-        counts[stamp] = counts.get(stamp, 0) + 1
-    summary_lines = [
-        "✅ Удаление завершено",
-        "",
-        f"Всего удалено: {len(rows)}",
-    ]
-    for stamp in _DELETE_STAMPS:
-        summary_lines.append(f"• stamp={stamp}: {counts.get(stamp, 0)}")
-    extra = [s for s in counts if s not in _DELETE_STAMPS]
-    for stamp in extra:
-        summary_lines.append(f"• stamp={stamp}: {counts[stamp]}")
-
-    export_path = _build_delete_stamps_xlsx(rows)
-    try:
-        await bot.send_document(
-            chat_id,
-            document=FSInputFile(export_path, filename="deleted_stamps.xlsx"),
-            caption="\n".join(summary_lines)[:1024],
-        )
-    finally:
-        try:
-            os.remove(export_path)
-        except OSError:
-            pass
-
-    preview_limit = 40
-    id_lines = [f"{row.get('user_id')}\t{row.get('stamp')}" for row in rows[:preview_limit]]
-    text = "Удалённые user_id / stamp:\n" + "\n".join(id_lines)
-    if len(rows) > preview_limit:
-        text += f"\n… и ещё {len(rows) - preview_limit} (полный список в Excel)"
-    for part in _split_long_text(text):
-        await bot.send_message(chat_id, part)
-
-
-@router.message(Command(commands=["delete_stamps"]))
-async def delete_stamps_command(message: Message):
-    """Превью удаления пользователей со stamp nnnn и premium."""
+@router.message(Command(commands=["delete_stamp"]))
+async def delete_stamp_command(message: Message):
     if message.from_user.id not in ADMIN_IDS:
         return
 
-    rows = await sql.list_users_by_stamps(list(_DELETE_STAMPS))
-    if not rows:
-        await message.answer("Пользователей со stamp nnnn / premium не найдено.")
+    args = (message.text or "").split(maxsplit=1)
+    if len(args) < 2 or not args[1].strip():
+        await message.answer("❌ Использование: /delete_stamp <stamp>\nНапример: /delete_stamp ra_google")
         return
 
+    stamp = args[1].strip()[:100]
+    try:
+        count = await sql.count_users_by_stamp(stamp)
+    except Exception as e:
+        logger.exception("/delete_stamp count")
+        await message.answer(f"❌ Ошибка: {e}")
+        return
+
+    if count == 0:
+        await message.answer(f"ℹ️ Пользователей с меткой <code>{stamp}</code> не найдено.", parse_mode="HTML")
+        return
+
+    token = _register_admin_bulk_delete_pending(
+        message.from_user.id,
+        "stamp",
+        stamp=stamp,
+    )
     await message.answer(
-        _delete_stamps_preview_text(rows),
-        reply_markup=_delete_stamps_confirm_kb(),
+        f"🏷 Метка: <code>{stamp}</code>\n"
+        f"👥 Найдено пользователей: <b>{count}</b>\n\n"
+        f"Удалить всех из БД бота?",
         parse_mode="HTML",
+        reply_markup=_admin_bulk_delete_confirm_kb("stamp", token),
     )
 
 
-@router.callback_query(F.data == _DEL_STAMPS_NO_CB)
-async def delete_stamps_cancel(callback: CallbackQuery):
-    if callback.from_user.id not in ADMIN_IDS:
-        await callback.answer("Нет доступа.", show_alert=True)
-        return
-    await callback.answer()
-    await callback.message.edit_text("Удаление пользователей со stamp nnnn / premium отменено.")
-
-
-@router.callback_query(F.data == _DEL_STAMPS_YES_CB)
-async def delete_stamps_confirm(callback: CallbackQuery):
-    if callback.from_user.id not in ADMIN_IDS:
-        await callback.answer("Нет доступа.", show_alert=True)
+@router.message(Command(commands=["delete_old"]))
+async def delete_old_command(message: Message):
+    if message.from_user.id not in ADMIN_IDS:
         return
 
-    await callback.answer()
-    await callback.message.edit_text("⏳ Удаляю пользователей со stamp nnnn / premium…")
+    cutoff = datetime.now(timezone.utc) - timedelta(days=_OLD_INACTIVE_DAYS)
+    cutoff_naive = cutoff.replace(tzinfo=None)
 
     try:
-        rows = await sql.delete_users_by_stamps(list(_DELETE_STAMPS))
+        count = await sql.count_old_inactive_users(cutoff_naive)
     except Exception as e:
-        logger.exception("Ошибка в /delete_stamps")
-        await callback.message.edit_text(f"❌ Ошибка при удалении: {e}")
+        logger.exception("/delete_old count")
+        await message.answer(f"❌ Ошибка: {e}")
         return
 
-    if not rows:
-        await callback.message.edit_text("Пользователей со stamp nnnn / premium уже нет.")
+    cutoff_label = cutoff.astimezone(_MSK).strftime("%d.%m.%Y %H:%M МСК")
+    criteria = (
+        "in_panel = False, is_connect = False, reserve_field = False, "
+        "subscription_end_date IS NULL, create_user раньше cutoff"
+    )
+
+    if count == 0:
+        await message.answer(
+            f"ℹ️ Старых неактивных пользователей не найдено.\n"
+            f"Cutoff (регистрация до): {cutoff_label}\n"
+            f"Условия: {criteria}"
+        )
+        return
+
+    token = _register_admin_bulk_delete_pending(
+        message.from_user.id,
+        "old",
+        cutoff_iso=cutoff.isoformat(),
+    )
+    await message.answer(
+        f"🧹 <b>/delete_old</b>\n\n"
+        f"👥 Найдено: <b>{count}</b>\n"
+        f"📅 Регистрация раньше: <b>{cutoff_label}</b>\n"
+        f"📋 {criteria}\n\n"
+        f"Удалить всех из БД бота?",
+        parse_mode="HTML",
+        reply_markup=_admin_bulk_delete_confirm_kb("old", token),
+    )
+
+
+@router.callback_query(F.data.startswith("adm_del:"))
+async def admin_bulk_delete_callback(callback: CallbackQuery):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("❌ Только для админов", show_alert=True)
+        return
+
+    parts = (callback.data or "").split(":")
+    if len(parts) != 4:
+        await callback.answer("❌ Некорректные данные", show_alert=True)
+        return
+
+    _prefix, kind, action, token = parts
+    if kind not in ("stamp", "old") or action not in ("y", "n"):
+        await callback.answer("❌ Некорректные данные", show_alert=True)
+        return
+
+    pending = _pop_admin_bulk_delete_pending(token, callback.from_user.id)
+    if pending is None:
+        await callback.answer("❌ Запрос устарел или уже обработан", show_alert=True)
+        return
+
+    msg = callback.message
+    if action == "n":
+        if msg:
+            try:
+                await msg.edit_text("❌ Удаление отменено.", reply_markup=None)
+            except Exception:
+                pass
+        await callback.answer("Отменено")
+        return
+
+    await callback.answer("Удаляю…")
+    if msg:
+        try:
+            await msg.edit_text("⏳ Удаляю пользователей из БД…", reply_markup=None)
+        except Exception:
+            pass
+
+    admin_chat_id = msg.chat.id if msg else callback.from_user.id
+
+    try:
+        if kind == "stamp":
+            stamp = pending.get("stamp") or ""
+            user_ids = await sql.get_user_ids_by_stamp(stamp)
+            title = f"Удаление по метке «{stamp}»"
+        else:
+            cutoff_iso = pending.get("cutoff_iso") or ""
+            cutoff = datetime.fromisoformat(cutoff_iso)
+            cutoff_naive = cutoff.replace(tzinfo=None)
+            user_ids = await sql.get_old_inactive_user_ids(cutoff_naive)
+            title = "/delete_old"
+    except Exception as e:
+        logger.exception("adm_del fetch user_ids")
+        await bot.send_message(admin_chat_id, f"❌ Ошибка при выборке: {e}")
         return
 
     logger.info(
-        f"Администратор {callback.from_user.id} удалил {len(rows)} пользователей "
-        f"со stamp nnnn/premium"
+        "Админ {} подтвердил adm_del kind={} count={}",
+        callback.from_user.id,
+        kind,
+        len(user_ids),
     )
-    await callback.message.edit_text(f"✅ Удалено {len(rows)} пользователей. Отчёт ниже.")
-    await _send_delete_stamps_report(callback.message.chat.id, rows)
+    await _run_admin_bulk_delete(admin_chat_id, user_ids, title=title)
 
 
 @router.message(Command("online"))

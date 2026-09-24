@@ -3233,6 +3233,49 @@ class AsyncSQL:
             'all_users'
         ]
 
+    @staticmethod
+    def _old_inactive_users_criteria(cutoff: datetime):
+        """Не брал ключ, не подключался, не платил, без subscription_end_date, регистрация до cutoff."""
+        return and_(
+            Users.in_panel.is_(False),
+            Users.is_connect.is_(False),
+            Users.reserve_field.is_(False),
+            Users.subscription_end_date.is_(None),
+            Users.create_user < cutoff,
+        )
+
+    async def count_users_by_stamp(self, stamp: str) -> int:
+        async with self.session_factory() as session:
+            stmt = select(func.count()).select_from(Users).where(Users.stamp == stamp)
+            result = await session.execute(stmt)
+            return int(result.scalar_one() or 0)
+
+    async def get_user_ids_by_stamp(self, stamp: str) -> List[int]:
+        async with self.session_factory() as session:
+            stmt = select(Users.user_id).where(Users.stamp == stamp).order_by(Users.user_id)
+            result = await session.execute(stmt)
+            return [int(row[0]) for row in result.all()]
+
+    async def count_old_inactive_users(self, cutoff: datetime) -> int:
+        async with self.session_factory() as session:
+            stmt = (
+                select(func.count())
+                .select_from(Users)
+                .where(self._old_inactive_users_criteria(cutoff))
+            )
+            result = await session.execute(stmt)
+            return int(result.scalar_one() or 0)
+
+    async def get_old_inactive_user_ids(self, cutoff: datetime) -> List[int]:
+        async with self.session_factory() as session:
+            stmt = (
+                select(Users.user_id)
+                .where(self._old_inactive_users_criteria(cutoff))
+                .order_by(Users.user_id)
+            )
+            result = await session.execute(stmt)
+            return [int(row[0]) for row in result.all()]
+
     async def delete_from_db(self, user_id: int) -> bool:
         """Полностью удаляет пользователя из БД по user_id."""
         async with self.session_factory() as session:
@@ -3247,82 +3290,6 @@ class AsyncSQL:
             await session.commit()
             logger.info(f"✅ Удалено пользователей: 1 (User_id: {user_id})")
             return True
-
-    async def list_users_by_stamps(self, stamps: List[str]) -> List[Dict[str, Any]]:
-        """Снимок пользователей с stamp из списка (для превью и отчёта)."""
-        if not stamps:
-            return []
-        async with self.session_factory() as session:
-            stmt = select(Users).where(Users.stamp.in_(stamps)).order_by(Users.stamp, Users.id)
-            result = await session.execute(stmt)
-            users = list(result.scalars().all())
-            snapshots = []
-            for u in users:
-                site = await self._first_site_for_tg_id(session, u.user_id)
-                snapshots.append(self._user_delete_snapshot(u, site))
-            return snapshots
-
-    async def delete_users_by_stamps(self, stamps: List[str]) -> List[Dict[str, Any]]:
-        """
-        Удаляет пользователей с stamp из списка.
-        Возвращает снимок удалённых строк. Связанные linking/reset-коды тоже чистятся.
-        """
-        if not stamps:
-            return []
-        async with self.session_factory() as session:
-            stmt = select(Users).where(Users.stamp.in_(stamps)).order_by(Users.stamp, Users.id)
-            result = await session.execute(stmt)
-            users = list(result.scalars().all())
-            if not users:
-                return []
-
-            tg_ids = [u.user_id for u in users]
-            site_stmt = select(FirstSite).where(FirstSite.tg_id.in_(tg_ids))
-            sites = list((await session.execute(site_stmt)).scalars().all())
-            site_by_tg = {s.tg_id: s for s in sites}
-
-            snapshots = [
-                self._user_delete_snapshot(u, site_by_tg.get(u.user_id))
-                for u in users
-            ]
-            internal_ids = [u.id for u in users]
-            emails = [s.email for s in sites if s.email]
-
-            for i in range(0, len(internal_ids), _STAT_IN_CHUNK):
-                chunk = internal_ids[i : i + _STAT_IN_CHUNK]
-                await session.execute(delete(LinkingCodes).where(LinkingCodes.user_id.in_(chunk)))
-            for i in range(0, len(tg_ids), _STAT_IN_CHUNK):
-                chunk = tg_ids[i : i + _STAT_IN_CHUNK]
-                await session.execute(delete(FirstSite).where(FirstSite.tg_id.in_(chunk)))
-            for i in range(0, len(internal_ids), _STAT_IN_CHUNK):
-                chunk = internal_ids[i : i + _STAT_IN_CHUNK]
-                await session.execute(delete(Users).where(Users.id.in_(chunk)))
-            for i in range(0, len(emails), _STAT_IN_CHUNK):
-                await session.execute(
-                    delete(PasswordResetCodes).where(
-                        PasswordResetCodes.email.in_(emails[i : i + _STAT_IN_CHUNK])
-                    )
-                )
-            await session.commit()
-
-            logger.info(f"✅ Удалено пользователей: {len(snapshots)} (stamps={stamps})")
-            return snapshots
-
-    @staticmethod
-    def _user_delete_snapshot(user: Users, site: Optional[FirstSite] = None) -> Dict[str, Any]:
-        return {
-            "id": user.id,
-            "user_id": user.user_id,
-            "stamp": user.stamp,
-            "email": site.email if site else None,
-            "ref": user.ref,
-            "partner": user.partner,
-            "create_user": user.create_user,
-            "subscription_end_date": user.subscription_end_date,
-            "in_panel": user.in_panel,
-            "is_connect": user.is_connect,
-            "is_delete": user.is_delete,
-        }
 
     async def reset_all_delete_flag(self) -> int:
         """Устанавливает Is_delete = False для всех записей в таблице users."""

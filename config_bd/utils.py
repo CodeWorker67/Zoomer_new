@@ -3137,7 +3137,8 @@ class AsyncSQL:
         Возвращает статистику по пользователям:
         - partner_{id} — зашедшие по партнёрской ссылке (Users.partner == id);
         - иначе Ref == arg, если таких нет — stamp == arg.
-        total_payments — сумма подтверждённых платежей: Payments + WATA СБП + WATA карта + FreeKassa.
+        total_payments — сумма успешных платежей (confirmed/paid) из всех платёжных таблиц, в рублях
+        (Stars и CryptoBot конвертируются).
         Возвращает (total, with_sub, with_tarif, with_tarif_not_blocked, total_payments, source,
         wata_sbp, wata_card, fk_sbp) или 9×None если нет совпадений.
         """
@@ -3190,33 +3191,53 @@ class AsyncSQL:
             with_tarif //= 2
             with_tarif_not_blocked //= 2
 
+            from handlers.handlers_statistic import convert_crypto_to_rub, convert_stars_to_rub
+
+            def _stars_to_rub(amount) -> Optional[int]:
+                if amount is None:
+                    return None
+                mapped = convert_stars_to_rub(int(amount))
+                return mapped if mapped is not None else int(amount)
+
             for i in range(0, len(users), _STAT_IN_CHUNK):
                 chunk = users[i : i + _STAT_IN_CHUNK]
-                stmt_pay = select(func.coalesce(func.sum(Payments.amount), 0)).where(
-                    Payments.user_id.in_(chunk),
-                    Payments.status == 'confirmed',
-                )
-                chunk_payments = (await session.execute(stmt_pay)).scalar() or 0
-                stmt_wata_sbp = select(func.coalesce(func.sum(PaymentsWataSBP.amount), 0)).where(
-                    PaymentsWataSBP.user_id.in_(chunk),
-                    PaymentsWataSBP.status == 'confirmed',
-                )
-                chunk_wata_sbp = (await session.execute(stmt_wata_sbp)).scalar() or 0
-                stmt_wata_card = select(func.coalesce(func.sum(PaymentsWataCard.amount), 0)).where(
-                    PaymentsWataCard.user_id.in_(chunk),
-                    PaymentsWataCard.status == 'confirmed',
-                )
-                chunk_wata_card = (await session.execute(stmt_wata_card)).scalar() or 0
-                stmt_fk_sbp = select(func.coalesce(func.sum(PaymentsFkSBP.amount), 0)).where(
-                    PaymentsFkSBP.user_id.in_(chunk),
-                    PaymentsFkSBP.status == 'confirmed',
-                )
-                chunk_fk_sbp = (await session.execute(stmt_fk_sbp)).scalar() or 0
+                for model in _MERGE_PAYMENT_MODELS:
+                    if model is PaymentsStars:
+                        stmt_stars = select(PaymentsStars.amount).where(
+                            PaymentsStars.user_id.in_(chunk),
+                            PaymentsStars.status.in_(_BILLING_OK_STATUSES),
+                        )
+                        for (amt,) in (await session.execute(stmt_stars)).all():
+                            rub = _stars_to_rub(amt)
+                            if rub:
+                                total_payments += int(rub)
+                        continue
+                    if model is PaymentsCryptobot:
+                        stmt_crypto = select(
+                            PaymentsCryptobot.amount,
+                            PaymentsCryptobot.currency,
+                        ).where(
+                            PaymentsCryptobot.user_id.in_(chunk),
+                            PaymentsCryptobot.status.in_(_BILLING_OK_STATUSES),
+                        )
+                        for amt, cur in (await session.execute(stmt_crypto)).all():
+                            rub = convert_crypto_to_rub(cur, str(amt))
+                            if rub:
+                                total_payments += int(rub)
+                        continue
 
-                wata_sbp += chunk_wata_sbp
-                wata_card += chunk_wata_card
-                fk_sbp += chunk_fk_sbp
-                total_payments += chunk_payments + chunk_wata_sbp + chunk_wata_card + chunk_fk_sbp
+                    stmt_sum = select(func.coalesce(func.sum(model.amount), 0)).where(
+                        model.user_id.in_(chunk),
+                        model.status.in_(_BILLING_OK_STATUSES),
+                    )
+                    chunk_sum = int((await session.execute(stmt_sum)).scalar() or 0)
+                    total_payments += chunk_sum
+                    if model is PaymentsWataSBP:
+                        wata_sbp += chunk_sum
+                    elif model is PaymentsWataCard:
+                        wata_card += chunk_sum
+                    elif model is PaymentsFkSBP:
+                        fk_sbp += chunk_sum
 
         return total, with_sub, with_tarif, with_tarif_not_blocked, total_payments, source, wata_sbp, wata_card, fk_sbp
 

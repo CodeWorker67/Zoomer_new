@@ -5,7 +5,7 @@ from config import ADMIN_IDS
 from services.wheel_discount import CheckoutQuote, get_checkout_quote, KIND_GIFT, KIND_SUB, KIND_TRAFFIC
 
 ADMIN_TEST_RUB = 1
-ADMIN_PLATEGA_TEST_RUB = 10
+ADMIN_PLATEGA_TEST_RUB = 50
 PLATEGA_PAYLOAD_METHODS = frozenset({"sbp", "card", "crypto"})
 
 
@@ -47,7 +47,7 @@ def apply_admin_test_price(user_id: int, quote: CheckoutQuote, *, stars: bool = 
 
 
 def apply_admin_platega_test_price(user_id: int, quote: CheckoutQuote) -> CheckoutQuote:
-    """10 ₽ для теста Platega (СБП/карта); wdtoken сохраняем."""
+    """50 ₽ для теста Platega (СБП/карта); wdtoken сохраняем."""
     if user_id not in ADMIN_IDS:
         return quote
     return CheckoutQuote(

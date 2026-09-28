@@ -42,7 +42,7 @@ from logging_config import logger
 from payments.payload_source import SITE, SUBPAGE
 from payments.pay_cryptobot import create_cryptobot_payment
 from payments.pay_platega import pay_site_card, pay_site_sbp
-from payments.wheel_checkout import apply_admin_test_price, quote_traffic
+from payments.wheel_checkout import ADMIN_PLATEGA_TEST_RUB, apply_admin_platega_test_price, quote_traffic
 from services.unisender import is_configured as unisender_configured
 from services.unisender import send_email as send_unisender_email
 from payments.pay_stars import get_stars_amount
@@ -1012,7 +1012,7 @@ async def payments_create(ctx: JwtCtx, body: CreatePaymentIn):
     desc_key, duration_str, white = _tariff_parts(tariff_id)
     price = dct_price[tariff_id]
     if billing_user_id in ADMIN_IDS:
-        price = 1
+        price = ADMIN_PLATEGA_TEST_RUB
 
     if body.method == "sbp" and (not PLATEGA_API_KEY or not PLATEGA_MERCHANT_ID):
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Platega is not configured")
@@ -1084,7 +1084,7 @@ async def payments_create_traffic(ctx: JwtCtx, body: CreateTrafficPaymentIn):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown traffic package")
 
     quote = await quote_traffic(billing_user_id, gb)
-    quote = apply_admin_test_price(billing_user_id, quote)
+    quote = apply_admin_platega_test_price(billing_user_id, quote)
     price = quote.final_rub
     duration = f"traffic{gb}"
     description = f"Пакет трафика {gb} GB"
@@ -1147,7 +1147,7 @@ async def sub_page_pay_fk_sbp(body: SubPagePayIn, request: Request, _: SubPageAu
     payload_user, billing_user_id = await _resolve_sub_page_payer(body.user_id)
     price = dct_price[body.duration]
     if billing_user_id in ADMIN_IDS:
-        price = 1
+        price = ADMIN_PLATEGA_TEST_RUB
 
     result = await pay_site_sbp(
         val=str(price),
@@ -1185,7 +1185,7 @@ async def sub_page_pay_fk_card(body: SubPagePayIn, request: Request, _: SubPageA
     payload_user, billing_user_id = await _resolve_sub_page_payer(body.user_id)
     price = dct_price[body.duration]
     if billing_user_id in ADMIN_IDS:
-        price = 1
+        price = ADMIN_PLATEGA_TEST_RUB
 
     result = await pay_site_card(
         val=str(price),

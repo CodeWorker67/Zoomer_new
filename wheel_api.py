@@ -18,7 +18,7 @@ from payments.gift_pricing import gift_rub_amount_and_desc
 from payments.payload_source import MINIAPP
 from payments.pay_platega import PLATEGA_CARD_METHOD, PLATEGA_SBP_METHOD, pay, pay_for_gift
 from payments.tariff_gate import normalize_tariff_duration_key
-from payments.wheel_checkout import apply_admin_test_price, quote_gift, quote_subscription
+from payments.wheel_checkout import apply_admin_platega_test_price, quote_gift, quote_subscription
 from services.wheel import wheel_begin_spin, wheel_complete_spin, wheel_public_state, wheel_recent_wins
 
 _WHEEL_CHECKOUT_DURATIONS = frozenset({"7", "30", "90", "180", "365", "730"})
@@ -133,7 +133,7 @@ async def _wheel_checkout_quote(uid: int, duration_key: str, target: str):
         quote = await quote_gift(uid, desc_key)
     else:
         quote = await quote_subscription(uid, desc_key)
-    return desc_key, apply_admin_test_price(uid, quote)
+    return desc_key, apply_admin_platega_test_price(uid, quote)
 
 
 @router.post("/checkout/quote")

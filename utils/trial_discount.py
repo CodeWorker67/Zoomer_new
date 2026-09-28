@@ -44,7 +44,6 @@ async def validate_payload_trial_discount(
     if payload_parts.get("gift", "False") == "True":
         return False
     from bot import sql
-    from config import ADMIN_IDS
 
     user = await sql.get_user_object_by_user_id(payer_user_id)
     if not user_eligible_for_trial_discount(user):
@@ -68,5 +67,7 @@ async def validate_payload_trial_discount(
     else:
         expected = trial_discounted_rub(product_key)
 
-    admin_test = int(payer_user_id) in ADMIN_IDS and paid == 1
+    from payments.wheel_checkout import admin_test_payment_ok
+
+    admin_test = admin_test_payment_ok(int(payer_user_id), paid, method)
     return paid == expected or admin_test

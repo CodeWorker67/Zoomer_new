@@ -13,7 +13,7 @@ from logging_config import logger
 from payments.pay_cryptobot import create_cryptobot_payment
 from payments.pay_platega import pay as pay_platega, PLATEGA_CARD_METHOD, PLATEGA_SBP_METHOD
 from payments.payload_source import BOT
-from payments.wheel_checkout import apply_admin_test_price, quote_traffic
+from payments.wheel_checkout import apply_admin_platega_test_price, apply_admin_test_price, quote_traffic
 from wl_traffic.constants import WL_TRAFFIC_TARIFFS
 
 router = Router()
@@ -49,7 +49,7 @@ async def _pay_rub(callback: CallbackQuery, ui_kind: str) -> None:
     uid = callback.from_user.id
     user_id = str(uid)
     quote = await quote_traffic(uid, gb)
-    quote = apply_admin_test_price(uid, quote)
+    quote = apply_admin_platega_test_price(uid, quote)
     price = quote.final_rub
     duration = _traffic_duration(gb)
 

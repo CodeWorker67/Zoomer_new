@@ -7,7 +7,6 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from bot import sql
-from config import ADMIN_IDS
 from logging_config import logger
 from payments.gift_pricing import gift_rub_amount_and_desc, regular_rub_amount
 from payments.tariff_gate import normalize_tariff_duration_key
@@ -376,7 +375,9 @@ async def validate_payload_discount(
     method = payload_parts.get("method", "")
     paid = int(float(payload_parts.get("amount", 0)))
     expected = int(active.final_stars if method == "stars" else active.final_rub)
-    admin_test = int(payer_user_id) in ADMIN_IDS and paid == 1
+    from payments.wheel_checkout import admin_test_payment_ok
+
+    admin_test = admin_test_payment_ok(int(payer_user_id), paid, method)
     if paid != expected and not admin_test:
         logger.error(
             "Wheel discount: сумма {} != {} uid={}",

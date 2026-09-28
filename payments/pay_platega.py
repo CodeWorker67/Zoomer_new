@@ -19,7 +19,12 @@ from config import (
 from keyboard import keyboard_payment_sbp, create_kb
 from lexicon import dct_desc, dct_price, lexicon
 from payments.gift_pricing import gift_rub_amount_and_desc, regular_rub_amount
-from payments.wheel_checkout import apply_admin_test_price, quote_gift, quote_subscription
+from payments.wheel_checkout import (
+    ADMIN_PLATEGA_TEST_RUB,
+    apply_admin_platega_test_price,
+    quote_gift,
+    quote_subscription,
+)
 from logging_config import logger
 from payments.payment_limits import payment_creation_allowed
 from payments.payload_source import BOT, SITE
@@ -374,7 +379,7 @@ async def _pay_site(
         return {"status": "error", "url": "", "id": ""}
 
     if billing_user_id in ADMIN_IDS:
-        val = "1"
+        val = str(ADMIN_PLATEGA_TEST_RUB)
 
     method = _platega_method_name(payment_method)
     amount_rub = _platega_amount_rub(str(val), payment_method)
@@ -526,7 +531,7 @@ async def _handle_platega_button_callback(callback: CallbackQuery, ui_kind: str)
         rub_amount = quote.final_rub
         gift_des = dct_desc[desc_key]
         suffix = quote.payload_suffix
-    quote = apply_admin_test_price(uid, quote)
+    quote = apply_admin_platega_test_price(uid, quote)
     rub_amount = quote.final_rub
     suffix = quote.payload_suffix
     user_id = str(uid)
@@ -602,7 +607,7 @@ async def process_payment_card(callback: CallbackQuery):
     else:
         quote = await quote_subscription(uid, desc_key)
         gift_des = dct_desc[desc_key]
-    quote = apply_admin_test_price(uid, quote)
+    quote = apply_admin_platega_test_price(uid, quote)
     rub_amount = quote.final_rub
     suffix = quote.payload_suffix
     user_id = str(uid)

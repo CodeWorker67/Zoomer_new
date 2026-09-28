@@ -43,6 +43,7 @@ from lexicon import dct_desc, dct_price, lexicon
 from logging_config import logger
 from payments.payload_source import SITE
 from payments.pay_platega import pay_site_card, pay_site_sbp
+from payments.wheel_checkout import ADMIN_PLATEGA_TEST_RUB
 from services.loginbot import LOGINBOT_DEFAULT_TIMEOUT, LoginBotError, start_call_auth
 from services.unisender import send_email as send_unisender_email
 from services.whatsapp_cloud import (
@@ -977,7 +978,7 @@ async def landing_payments_create(ctx: LandingCtx, body: CreatePaymentIn):
     desc_key, duration_str, white = _tariff_parts(tariff_id)
     price = dct_price[tariff_id]
     if billing_user_id in ADMIN_IDS:
-        price = 1
+        price = ADMIN_PLATEGA_TEST_RUB
     if body.method == "sbp" and (not PLATEGA_API_KEY or not PLATEGA_MERCHANT_ID):
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Platega is not configured")
     if body.method == "card" and (not PLATEGA_API_KEY or not PLATEGA_MERCHANT_ID):

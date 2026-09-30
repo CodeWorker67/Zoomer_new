@@ -13,7 +13,7 @@ from aiogram.types import (
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot import sql
+from bot import sql, x3
 from config import ADMIN_IDS, CHECKER_ID, BOT_URL
 from telegram_ids import is_telegram_chat_id
 from keyboard import (
@@ -44,6 +44,7 @@ CB_PIN = "bcpin:"
 BCBTN = "bcbtn:"
 BCACT = "bcact:"
 BCST = "bcst:"
+BC_CONNECT_VPN_CB = "bc_connect_vpn"
 
 LINK_STYLE_LABELS = {
     "primary": "Основной (синий)",
@@ -242,9 +243,37 @@ def _append_preset(spec: list, preset_id: str) -> None:
                         "style": style,
                     }
                 )
+            elif preset_id == "connect_vpn":
+                spec.append(
+                    {
+                        "kind": "cb",
+                        "cb": BC_CONNECT_VPN_CB,
+                        "text": text,
+                        "style": style,
+                    }
+                )
             else:
                 spec.append({"kind": "cb", "cb": cb_id, "text": text, "style": style})
             return
+
+
+def _markup_connect_btn_as_sub_url(
+    markup: InlineKeyboardMarkup,
+    sub_url: str,
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for row in markup.inline_keyboard:
+        new_row: list[InlineKeyboardButton] = []
+        for btn in row:
+            if btn.callback_data == BC_CONNECT_VPN_CB:
+                kwargs: dict = {"text": btn.text, "url": sub_url}
+                if btn.style:
+                    kwargs["style"] = btn.style
+                new_row.append(InlineKeyboardButton(**kwargs))
+            else:
+                new_row.append(btn)
+        rows.append(new_row)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def _build_custom_reply_markup(spec: list, target_user_id: int) -> InlineKeyboardMarkup | None:
@@ -680,6 +709,30 @@ async def broadcast_confirm_yes(callback: CallbackQuery, state: FSMContext, bot:
     logger.success(f"Send broadcast to {count} users")
     await bot.send_message(admin_chat_id, f"Сообщение успешно отправлено {count} пользователям.")
     await state.clear()
+
+
+@router.callback_query(F.data == BC_CONNECT_VPN_CB)
+async def broadcast_connect_btn_to_sub_link(callback: CallbackQuery):
+    from lexicon import lexicon
+
+    uid = callback.from_user.id
+    sub_url = await x3.sublink(str(uid))
+    if not sub_url:
+        await callback.answer(lexicon["no_sub"], show_alert=True)
+        return
+
+    markup = callback.message.reply_markup
+    if not markup:
+        await callback.answer()
+        return
+
+    await callback.answer()
+    try:
+        await callback.message.edit_reply_markup(
+            reply_markup=_markup_connect_btn_as_sub_url(markup, sub_url),
+        )
+    except Exception as e:
+        logger.warning(f"Broadcast: не удалось заменить кнопку «Подключить» на ссылку: {e}")
 
 
 @router.callback_query(F.data == "broadcast_cancel")

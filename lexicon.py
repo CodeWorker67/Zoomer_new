@@ -793,6 +793,16 @@ _ADMIN_BUY_LOTTERY_LINE = (
     f'в розыгрыше более 100 призов{TICKET_EMOJI_HTML}'
 )
 
+_PUSH_SUBSCRIPTION_RAFFLE_BLOCK = (
+    '🎁 <b>Прямо сейчас проходит Розыгрыш — «Зумерскому 2 года»!</b>\n\n'
+    f'{TICKET_EMOJI_HTML}Продлевай подписку и получай билетики для выигрыша '
+    f'<b>iPhone 18 Pro</b> 📱 и ещё <b>99 ценных призов</b>! 🎉\n\n'
+)
+
+for _push_key in ('push_7', 'push_3', 'push_1', 'push_0'):
+    lexicon[_push_key] += _PUSH_SUBSCRIPTION_RAFFLE_BLOCK
+lexicon['push_off'] = tuple(s + _PUSH_SUBSCRIPTION_RAFFLE_BLOCK for s in lexicon['push_off'])
+
 RAFFLE_CAPTION = (
     '🎁 <b>ЗУМЕРСКИЙ ДАРИТ — 100 ПРИЗОВЫХ МЕСТ! iPhone 18 pro</b>, '
     'iPhone duo и еще 98 ценных призов!⚡️\n\n'

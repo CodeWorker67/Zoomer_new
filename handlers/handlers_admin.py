@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, date, timezone, timedelta
 from typing import Dict, List, Optional, Any
 
+import bcrypt
 import openpyxl
 from openpyxl.styles import Alignment, Border, Side, PatternFill
 from sqlalchemy import select
@@ -336,6 +337,72 @@ async def user_info(message: Message):
         await message.answer(text)
     except Exception as e:
         await message.answer(f'Ошибка при формировании сообщения: {str(e)}')
+
+
+def _hash_site_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+@router.message(Command(commands=['password']))
+async def admin_set_password_command(message: Message):
+    """Смена пароля личного кабинета на сайте (email и привязанный Telegram)."""
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    text = message.text or ""
+    parts = text.split(maxsplit=2)
+    if len(parts) < 3:
+        await message.answer(
+            "❌ Использование: /password <telegram_id|site_id> <новый_пароль>\n"
+            "Например: /password 123456789 MyPass123\n"
+            "Пользователь только с сайта (отриц. id): /password -12 MyPass123"
+        )
+        return
+
+    try:
+        target_id = int(parts[1].strip())
+    except ValueError:
+        await message.answer("❌ ID должен быть числом (для сайта — отрицательным, например -12).")
+        return
+
+    new_password = parts[2]
+    if len(new_password) < 6:
+        await message.answer("❌ Пароль должен быть не короче 6 символов.")
+        return
+    if len(new_password) > 256:
+        await message.answer("❌ Пароль слишком длинный (макс. 256 символов).")
+        return
+
+    user_row = await sql.get_user(target_id)
+    if not user_row:
+        await message.answer(f"❌ Пользователь {target_id} не найден в базе данных.")
+        return
+
+    internal_id = int(user_row[0])
+    password_hash = _hash_site_password(new_password)
+    ok = await sql.set_password_hash_by_internal_id(internal_id, password_hash)
+    if not ok:
+        await message.answer("❌ Не удалось обновить пароль в БД.")
+        return
+
+    email = user_row[15]
+    if email:
+        await sql.delete_password_reset_codes_for_email(str(email))
+
+    email_line = f"Email: <code>{email}</code>\n" if email else ""
+    await message.answer(
+        f"✅ Пароль для входа на сайт обновлён.\n"
+        f"user_id в БД: <code>{target_id}</code>\n"
+        f"{email_line}"
+        f"internal id: <code>{internal_id}</code>",
+        parse_mode="HTML",
+    )
+    logger.info(
+        "Админ %s сменил пароль сайта для user_id=%s (internal_id=%s)",
+        message.from_user.id,
+        target_id,
+        internal_id,
+    )
 
 
 @router.message(Command(commands=['add_ticket', 'add_tickets']))
@@ -846,22 +913,48 @@ async def _build_find_message(
     return text, keyboard
 
 
+async def _resolve_find_target(query: str) -> tuple[Optional[int], str]:
+    """telegram_id / site_id или email (first_site, затем landing)."""
+    raw = query.strip()
+    if not raw:
+        return None, ""
+    try:
+        return int(raw), raw
+    except ValueError:
+        pass
+    row = await sql.get_user_by_email(raw)
+    if row:
+        return int(row[1]), raw
+    landing = await sql.get_landing_user_by_email(raw)
+    if landing:
+        user, _site = landing
+        return int(user.user_id), raw
+    return None, raw
+
+
 @router.message(Command(commands=["find"]))
 async def find_user_command(message: Message):
     if message.from_user.id not in ADMIN_IDS:
         return
 
-    args = (message.text or "").split()
-    if len(args) < 2:
+    args = (message.text or "").split(maxsplit=1)
+    if len(args) < 2 or not args[1].strip():
         await message.answer(
-            "❌ Использование: /find <telegram_id>\nНапример: /find 123456789"
+            "❌ Использование: /find <telegram_id|site_id|email>\n"
+            "Например: /find 123456789\n"
+            "/find user@mail.com"
         )
         return
 
     try:
-        target_id = int(args[1].strip())
-    except ValueError:
-        await message.answer("❌ ID должен быть числом.")
+        target_id, query = await _resolve_find_target(args[1])
+    except Exception as e:
+        logger.exception("/find resolve")
+        await message.answer(f"❌ Ошибка: {e}")
+        return
+
+    if target_id is None:
+        await message.answer(f"❌ Пользователь {query} не найден в базе данных.")
         return
 
     try:
@@ -872,7 +965,7 @@ async def find_user_command(message: Message):
         return
 
     if text is None:
-        await message.answer(f"❌ Пользователь {target_id} не найден в базе данных.")
+        await message.answer(f"❌ Пользователь {query} не найден в базе данных.")
         return
 
     await _send_find_message(message, text, keyboard)
@@ -998,7 +1091,8 @@ async def find_transaction_command(message: Message):
 _ADMIN_INFO_TEXT = (
     "<b>Команды администратора</b>\n\n"
     "<b>/pay</b> — подписки (БД/панель), WL-трафик, билеты, колесо, список оплат.\n"
-    "<b>/find</b> — карточка пользователя (+ кнопки +7/+30/+90 дн. и +10/+50 ГБ).\n"
+    "<b>/find</b> — карточка пользователя по telegram_id, site_id или email "
+    "(+ кнопки +7/+30/+90 дн. и +10/+50 ГБ).\n"
     "<b>/sub</b> — дата окончания подписки в БД и панели (white — только панель).\n"
     "<b>/add_traffic</b> — изменить limit_wl (GB; отрицательное значение уменьшает лимит).\n"
     "<b>/partner</b> — статистика партнёра и топ приглашённых по сумме оплат.\n"

@@ -38,6 +38,7 @@ from payments.tariff_gate import is_mobile_tariff_key
 import asyncio
 import re
 from aiogram import Router, F
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import (
     Message,
     CallbackQuery,
@@ -47,7 +48,11 @@ from aiogram.types import (
     InlineQuery,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
+    InaccessibleMessage,
+    BufferedInputFile,
+    InputMediaPhoto,
 )
+from utils.ref_qr import referral_link_qr_png
 from aiogram.filters import BaseFilter, ChatMemberUpdatedFilter, KICKED, MEMBER, Command
 from handlers.handlers_wheel_discount import show_tariff_with_optional_discount
 from lexicon import TRIAL_DISCOUNT_BANNER, buy_caption, buy_menu_caption, gift_menu_caption, lexicon
@@ -644,13 +649,39 @@ async def referral_program(callback: CallbackQuery):
     )
 
 
+@router.callback_query(F.data == 'ref_show_qr')
+async def ref_show_qr_cb(callback: CallbackQuery):
+    await callback.answer()
+    uid = int(callback.from_user.id)
+    message = callback.message
+    if message is None or isinstance(message, InaccessibleMessage) or not message.photo:
+        return
+
+    base = (BOT_URL or "").rstrip("/")
+    ref_url = f"{base}?start=ref{uid}"
+    qr_bytes = referral_link_qr_png(ref_url)
+    count = await sql.select_ref_count(uid)
+    caption = lexicon['ref_info'].format(count, uid)
+
+    try:
+        await message.edit_media(
+            media=InputMediaPhoto(
+                media=BufferedInputFile(qr_bytes, filename="ref_qr.png"),
+                caption=caption,
+                parse_mode="HTML",
+            ),
+            reply_markup=ref_keyboard(uid, show_qr=False),
+        )
+    except TelegramBadRequest as e:
+        logger.warning("ref_show_qr: edit_media failed uid={}: {}", uid, e)
+
+
 async def _ensure_user_exists(user_id: int) -> None:
     if await sql.get_user(user_id) is None:
         await sql.add_user(user_id, False, False)
 
 
-async def _send_partner_dashboard(callback: CallbackQuery) -> None:
-    tg_id = callback.from_user.id
+async def _partner_dashboard_caption(tg_id: int) -> str:
     user = await sql.get_user_object_by_user_id(tg_id)
     if user is None:
         await _ensure_user_exists(tg_id)
@@ -658,8 +689,8 @@ async def _send_partner_dashboard(callback: CallbackQuery) -> None:
 
     referrals = await sql.select_partner_count(tg_id)
     payments_sum = await sql.select_partner_referrals_payments_sum(tg_id)
-    balance = user.partner_balance or 0
-    paid_out = user.partner_pay or 0
+    balance = (user.partner_balance or 0) if user else 0
+    paid_out = (user.partner_pay or 0) if user else 0
     total_earned = balance + paid_out
     bot_link = partner_bot_link(tg_id)
     site_link = partner_site_link(tg_id)
@@ -668,21 +699,49 @@ async def _send_partner_dashboard(callback: CallbackQuery) -> None:
         if site_link
         else ""
     )
+    return lexicon['partner_dashboard'].format(
+        bot_link=bot_link,
+        site_block=site_block,
+        procent=PARTNER_PROCENT,
+        min_sum=PARTNER_MIN,
+        referrals=referrals,
+        payments_sum=payments_sum,
+        total_earned=total_earned,
+        paid_out=paid_out,
+        balance=balance,
+    )
 
+
+async def _edit_message_qr_photo(
+    callback: CallbackQuery,
+    qr_url: str,
+    caption: str,
+    reply_markup: InlineKeyboardMarkup,
+) -> None:
+    message = callback.message
+    if message is None or isinstance(message, InaccessibleMessage) or not message.photo:
+        return
+    qr_bytes = referral_link_qr_png(qr_url)
+    try:
+        await message.edit_media(
+            media=InputMediaPhoto(
+                media=BufferedInputFile(qr_bytes, filename="partner_qr.png"),
+                caption=caption,
+                parse_mode="HTML",
+            ),
+            reply_markup=reply_markup,
+        )
+    except TelegramBadRequest as e:
+        logger.warning("partner QR edit_media failed uid={}: {}", callback.from_user.id, e)
+
+
+async def _send_partner_dashboard(callback: CallbackQuery) -> None:
+    tg_id = callback.from_user.id
+    caption = await _partner_dashboard_caption(tg_id)
     await edit_or_send_photo(
         callback,
         "earn_with_us",
-        lexicon['partner_dashboard'].format(
-            bot_link=bot_link,
-            site_block=site_block,
-            procent=PARTNER_PROCENT,
-            min_sum=PARTNER_MIN,
-            referrals=referrals,
-            payments_sum=payments_sum,
-            total_earned=total_earned,
-            paid_out=paid_out,
-            balance=balance,
-        ),
+        caption,
         keyboard_partner_dashboard(tg_id),
     )
 
@@ -692,6 +751,37 @@ async def partner_program(callback: CallbackQuery):
     await callback.answer()
     await _ensure_user_exists(callback.from_user.id)
     await _send_partner_dashboard(callback)
+
+
+@router.callback_query(F.data == 'partner_qr_bot')
+async def partner_qr_bot_cb(callback: CallbackQuery):
+    await callback.answer()
+    uid = int(callback.from_user.id)
+    caption = await _partner_dashboard_caption(uid)
+    has_site = bool(partner_site_link(uid))
+    await _edit_message_qr_photo(
+        callback,
+        partner_bot_link(uid),
+        caption,
+        keyboard_partner_dashboard(uid, show_bot_qr=False, show_site_qr=has_site),
+    )
+
+
+@router.callback_query(F.data == 'partner_qr_site')
+async def partner_qr_site_cb(callback: CallbackQuery):
+    uid = int(callback.from_user.id)
+    site_url = partner_site_link(uid)
+    if not site_url:
+        await callback.answer("Ссылка на сайт не настроена", show_alert=True)
+        return
+    await callback.answer()
+    caption = await _partner_dashboard_caption(uid)
+    await _edit_message_qr_photo(
+        callback,
+        site_url,
+        caption,
+        keyboard_partner_dashboard(uid, show_bot_qr=True, show_site_qr=False),
+    )
 
 
 @router.callback_query(F.data == 'partner_withdraw')

@@ -12,7 +12,7 @@ from keyboard import (
 )
 from handlers.handlers_wheel_discount import show_tariff_with_optional_discount
 from lexicon import lexicon
-from utils.menu_ui import edit_or_send_photo, show_connect_screen
+from utils.menu_ui import edit_or_send_photo, has_active_subscription, show_connect_screen
 from wl_traffic.constants import (
     PROFILE_CB,
     WL_TRAFFIC_BUY_CB,
@@ -42,6 +42,10 @@ async def back_to_profile_cb(callback: CallbackQuery):
 
 @router.callback_query(F.data.in_({WL_TRAFFIC_BUY_CB, WL_TRAFFIC_BUY_SUB_CB}))
 async def wl_traffic_buy_cb(callback: CallbackQuery):
+    user_data = await sql.get_user(callback.from_user.id)
+    if not has_active_subscription(user_data):
+        await callback.answer("В начале купите подписку!", show_alert=True)
+        return
     back_callback = PROFILE_CB if callback.data == WL_TRAFFIC_BUY_CB else "buy_vpn_self"
     await callback.answer()
     await edit_or_send_photo(

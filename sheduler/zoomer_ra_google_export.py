@@ -5,13 +5,15 @@ import asyncio
 import os
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Dict, List
+from datetime import datetime, timezone
+from typing import Dict, List, Optional
 
 from sqlalchemy import func, select
 
 from config import GOOGLE_PATH_ZOOMER_RA, GOOGLE_SERVICE_ACCOUNT_FILE
 from config_bd.models import AsyncSessionLocal, Users
 from logging_config import logger
+from wl_traffic.service import is_forever_end_date
 
 _SHEET_HEADERS = [
     "ключ",
@@ -22,6 +24,18 @@ _SHEET_HEADERS = [
     "все триалы",
     "все триалы, которые подключали впн",
 ]
+
+
+def _subscription_active_at(sub_end: Optional[datetime], *, at: datetime) -> bool:
+    if sub_end is None:
+        return False
+    if is_forever_end_date(sub_end):
+        return True
+    if sub_end.tzinfo is None:
+        aware = sub_end.replace(tzinfo=timezone.utc)
+    else:
+        aware = sub_end.astimezone(timezone.utc)
+    return aware > at
 
 
 def _spreadsheet_id_from_env(value: str) -> str:
@@ -49,6 +63,7 @@ async def _collect_stamp_rows() -> List[List]:
             Users.reserve_field,
             Users.in_panel,
             Users.is_connect,
+            Users.subscription_end_date,
         ).where(
             Users.is_delete == False,
             # В ILIKE «_» — один любой символ; нужна подстрока «ra_», не «ra» + символ.
@@ -56,8 +71,9 @@ async def _collect_stamp_rows() -> List[List]:
         )
         rows = (await session.execute(stmt)).all()
 
+    export_moment = datetime.now(timezone.utc)
     by_stamp: Dict[str, _StampAgg] = defaultdict(_StampAgg)
-    for _user_id, stamp, reserve_field, in_panel, is_connect in rows:
+    for _user_id, stamp, reserve_field, in_panel, is_connect, sub_end in rows:
         key = (stamp or "").strip()
         if not key or "ra_" not in key.lower():
             continue
@@ -71,7 +87,11 @@ async def _collect_stamp_rows() -> List[List]:
             if is_connect:
                 agg.all_trials_connect += 1
 
-        if in_panel and not reserve_field:
+        if (
+            in_panel
+            and not reserve_field
+            and _subscription_active_at(sub_end, at=export_moment)
+        ):
             agg.active_trials += 1
             if is_connect:
                 agg.active_trials_connect += 1

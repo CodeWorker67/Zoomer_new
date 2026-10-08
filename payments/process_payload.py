@@ -26,6 +26,7 @@ from services.wheel_notify import (
     notify_purchase_wheel_attempts,
 )
 from services.raffle import grant_purchase_tickets, notify_purchase_tickets
+from services.yandex_metrica import report_landing_payment_to_metrica
 from services.wheel_discount import (
     commit_payload_discount,
     payer_id_from_payload_parts,
@@ -203,6 +204,7 @@ async def _process_traffic_topup(
 
     await post_payment_success(user_id, method, amount)
     await _credit_partner_commission(user_id, method, amount)
+    await report_landing_payment_to_metrica(user_id, method, amount)
 
     if CHECKER_ID is not None:
         try:
@@ -367,6 +369,7 @@ async def process_confirmed_payment(
                 await post_payment_success(pay_tracker_uid, method, amount)
 
             await _credit_partner_commission(giver_billing_id, method, amount)
+            await report_landing_payment_to_metrica(giver_billing_id, method, amount)
 
             marker = ' (тариф «Включи мобильный»)' if white_flag else ''
             gift_message = lexicon["payment_gift"].format(duration, marker, gift_id)
@@ -554,6 +557,7 @@ async def process_confirmed_payment(
                 await post_payment_success(tracker_pay_uid, method, amount)
 
             await _credit_partner_commission(db_uid, method, amount)
+            await report_landing_payment_to_metrica(db_uid, method, amount)
 
             if notify_tg is not None and notify_tg > 0:
                 try:

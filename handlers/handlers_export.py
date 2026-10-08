@@ -98,6 +98,7 @@ _USERS_EXPORT_ADMIN_COLUMNS = (
     "subscription_end_date",
     "last_broadcast_date",
     "stamp",
+    "yandex_id",
     "subscribtion",
     "field_bool_3",
     "partner",

@@ -247,7 +247,26 @@ def _landing_auth_type(site) -> str:
     return "email"
 
 
+def _landing_raffle_tickets(user) -> int:
+    raw = getattr(user, "tickets", None)
+    try:
+        n = int(raw or 0)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, n)
+
+
+def _landing_subscription_plan_name(user, panel_active: bool) -> str:
+    """«Пробный» только при активном доступе без успешных оплат (reserve_field)."""
+    if not panel_active:
+        return "Подписка"
+    if bool(getattr(user, "reserve_field", False)):
+        return "Подписка"
+    return "Пробный"
+
+
 def _landing_user_dict(user, site) -> dict[str, Any]:
+    tickets = _landing_raffle_tickets(user)
     return {
         "id": int(user.id),
         "email": site.email,
@@ -256,6 +275,9 @@ def _landing_user_dict(user, site) -> dict[str, Any]:
         "auth": _landing_auth_type(site),
         "billing_user_id": int(user.user_id),
         "has_password": bool(site.password),
+        "tickets": tickets,
+        "raffle_tickets": tickets,
+        "has_paid_subscription": bool(getattr(user, "reserve_field", False)),
     }
 
 
@@ -1102,13 +1124,25 @@ async def landing_remove_password(ctx: LandingCtx, body: RemovePasswordIn):
 
 @landing_router.get("/user/subscription")
 async def landing_user_subscription(ctx: LandingCtx):
+    user, _site = await _landing_user_pair(ctx)
     panel_un = await _landing_panel_username(ctx)
     result_pro = await x3.activ(panel_un)
     active, expires = _activ_block(result_pro)
+    tickets = _landing_raffle_tickets(user)
+    plan_name = _landing_subscription_plan_name(user, active)
+    has_paid = bool(getattr(user, "reserve_field", False))
     return {
         "active": active,
         "expires": expires,
-        "pro": {"active": active, "expires": expires},
+        "plan_name": plan_name,
+        "has_paid_subscription": has_paid,
+        "tickets": tickets,
+        "raffle_tickets": tickets,
+        "pro": {
+            "active": active,
+            "expires": expires,
+            "plan_name": plan_name,
+        },
     }
 
 

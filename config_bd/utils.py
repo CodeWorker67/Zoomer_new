@@ -790,6 +790,7 @@ class AsyncSQL:
         stamp: str = "",
         site_url: Optional[str] = None,
         partner: str = "",
+        yandex_id: Optional[str] = None,
     ) -> int:
         em = _norm_email(email)
         uid = await self.next_landing_user_id()
@@ -801,6 +802,7 @@ class AsyncSQL:
                 user_id=uid,
                 stamp=stamp,
                 partner=partner_val,
+                yandex_id=yandex_id or None,
                 create_user=_naive_utc(datetime.now(timezone.utc)),
             )
             session.add(u)
@@ -823,6 +825,7 @@ class AsyncSQL:
         stamp: str = "",
         site_url: Optional[str] = None,
         partner: str = "",
+        yandex_id: Optional[str] = None,
     ) -> int:
         normalized = str(phone).strip()
         uid = await self.next_landing_user_id()
@@ -834,6 +837,7 @@ class AsyncSQL:
                 user_id=uid,
                 stamp=stamp,
                 partner=partner_val,
+                yandex_id=yandex_id or None,
                 create_user=_naive_utc(datetime.now(timezone.utc)),
             )
             session.add(u)
@@ -857,6 +861,7 @@ class AsyncSQL:
         site_url: Optional[str] = None,
         partner: str = "",
         phone: Optional[str] = None,
+        yandex_id: Optional[str] = None,
     ) -> int:
         wa = str(whatsapp_id).strip()
         uid = await self.next_landing_user_id()
@@ -877,6 +882,7 @@ class AsyncSQL:
                 user_id=uid,
                 stamp=stamp or "whatsapp",
                 partner=partner_val,
+                yandex_id=yandex_id or None,
                 create_user=_naive_utc(datetime.now(timezone.utc)),
             )
             session.add(u)
@@ -901,6 +907,7 @@ class AsyncSQL:
         stamp: str = "",
         site_url: Optional[str] = None,
         partner: str = "",
+        yandex_id: Optional[str] = None,
     ) -> int:
         em = _norm_email(email)
         uid = await self.next_landing_user_id()
@@ -912,6 +919,7 @@ class AsyncSQL:
                 user_id=uid,
                 stamp=stamp,
                 partner=partner_val,
+                yandex_id=yandex_id or None,
                 create_user=_naive_utc(datetime.now(timezone.utc)),
             )
             session.add(u)
@@ -1284,6 +1292,7 @@ class AsyncSQL:
         in_chanel: bool = False,
         stamp: str = '',
         partner: str = '',
+        yandex_id: Optional[str] = None,
     ) -> bool:
         """True, если строка вставлена; False при конфликте user_id (гонки /start)."""
         async with self.session_factory() as session:
@@ -1298,6 +1307,7 @@ class AsyncSQL:
                     is_connect=is_connect,
                     in_chanel=in_chanel,
                     stamp=stamp,
+                    yandex_id=yandex_id or None,
                     create_user=_naive_utc(datetime.now(timezone.utc)),
                 )
                 .on_conflict_do_nothing(index_elements=[Users.user_id])

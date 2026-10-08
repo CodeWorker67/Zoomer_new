@@ -42,6 +42,7 @@ class Users(Base):
     last_notification_date = Column(Date, nullable=True)
     last_broadcast_date = Column(DateTime, nullable=True)
     stamp = Column(String(100), nullable=False)
+    yandex_id = Column(String(100), nullable=True)
     ttclid = Column(String(100), nullable=True)
     subscribtion = Column(String(255), nullable=True)
     field_str_1 = Column(String(255), nullable=True)

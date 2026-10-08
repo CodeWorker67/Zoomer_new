@@ -166,6 +166,7 @@ async def process_start_command(message: Message, command: Command):
     partner_login = ''
     existing = False
     stamp = ''
+    yandex_id = None
     ttclid = None
 
     if user_data:
@@ -216,6 +217,23 @@ async def process_start_command(message: Message, command: Command):
             in_panel = await activate_gift(message, gift_id)
             await asyncio.sleep(2)
             existing = True
+
+        elif start_arg.startswith('YD'):
+            from utils.yd_start import parse_yd_start_arg
+
+            if user_data:
+                logger.info(
+                    f'Юзер {message.from_user.id} - {message.from_user.username} '
+                    f'нажал старт повторно с Yandex-меткой'
+                )
+            else:
+                logger.success(
+                    f'Юзер {message.from_user.id} - {message.from_user.username} '
+                    f'зашел в бота в первый раз по Yandex-метке'
+                )
+                parsed = parse_yd_start_arg(start_arg)
+                if parsed:
+                    stamp, yandex_id = parsed
 
         elif start_arg.startswith('auth_'):
             # Website deeplink auth
@@ -277,6 +295,7 @@ async def process_start_command(message: Message, command: Command):
             ref=ref_login,
             stamp=stamp,
             partner=partner_login,
+            yandex_id=yandex_id,
         )
         logger.info(f'Юзер {message.from_user.id} - {message.from_user.username} добавлен в БД')
         if inserted:

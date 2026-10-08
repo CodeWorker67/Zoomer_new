@@ -360,6 +360,7 @@ async def _ensure_landing_whatsapp_user(
     site_url: Optional[str],
     partner: str,
     landing_stamp: str = "",
+    yandex_id: Optional[str] = None,
 ) -> tuple[Any, Any]:
     pair = await sql.get_landing_user_by_whatsapp_id(wa_id)
     if pair is not None:
@@ -377,6 +378,7 @@ async def _ensure_landing_whatsapp_user(
         site_url=site_url,
         partner=partner,
         phone=phone,
+        yandex_id=yandex_id,
     )
     pair = await sql.get_landing_user_by_internal_id(internal_id)
     if pair is None:
@@ -410,6 +412,7 @@ async def _ensure_landing_phone_user(
     site_url: Optional[str],
     partner: str,
     stamp: str = "",
+    yandex_id: Optional[str] = None,
 ) -> tuple[Any, Any]:
     pair = await sql.get_landing_user_by_phone(phone)
     if pair is not None:
@@ -421,6 +424,7 @@ async def _ensure_landing_phone_user(
         site_url=site_url,
         partner=partner,
         stamp=stamp,
+        yandex_id=yandex_id,
     )
     pair = await sql.get_landing_user_by_internal_id(internal_id)
     if pair is None:
@@ -501,8 +505,19 @@ def _parse_landing_stamp(raw: Optional[str]) -> str:
     value = str(raw).strip()
     if not value or value.startswith("partner_"):
         return ""
+    if value.startswith("YD"):
+        return ""
     if _parse_partner_ref(value):
         return ""
+    return value[:100]
+
+
+def _parse_landing_yandex_id(raw: Optional[str]) -> Optional[str]:
+    if not raw:
+        return None
+    value = str(raw).strip()
+    if not value:
+        return None
     return value[:100]
 
 
@@ -526,6 +541,7 @@ class EmailIn(BaseModel):
     email: EmailStr
     partner: Optional[str] = None
     stamp: Optional[str] = None
+    yandex_id: Optional[str] = None
 
 
 class VerifyCodeIn(BaseModel):
@@ -537,6 +553,7 @@ class GoogleAuthIn(BaseModel):
     credential: str
     partner: Optional[str] = None
     stamp: Optional[str] = None
+    yandex_id: Optional[str] = None
 
 
 class CreatePaymentIn(BaseModel):
@@ -569,12 +586,14 @@ class PhoneStartIn(BaseModel):
     phone: str = Field(min_length=10, max_length=32)
     partner: Optional[str] = None
     stamp: Optional[str] = None
+    yandex_id: Optional[str] = None
 
 
 class WhatsAppVerifyIn(BaseModel):
     code: str = Field(min_length=6, max_length=6)
     partner: Optional[str] = None
     stamp: Optional[str] = None
+    yandex_id: Optional[str] = None
 
 
 @landing_router.post("/auth/check-email")
@@ -616,6 +635,7 @@ async def landing_send_code(body: EmailIn, request: Request):
             site_url=_site_url_from_request(request),
             partner=partner,
             stamp=stamp,
+            yandex_id=_parse_landing_yandex_id(body.yandex_id),
         )
     await _send_landing_otp(em)
     return {"success": True, "email": em}
@@ -696,6 +716,7 @@ async def landing_google(body: GoogleAuthIn, request: Request):
                 site_url=_site_url_from_request(request),
                 partner=partner,
                 stamp=stamp,
+                yandex_id=_parse_landing_yandex_id(body.yandex_id),
             )
             pair = await sql.get_landing_user_by_internal_id(internal_id)
             if pair is None:
@@ -746,6 +767,7 @@ async def landing_phone_start(body: PhoneStartIn, request: Request):
         "created_at": time.time(),
         "partner": partner,
         "stamp": stamp,
+        "yandex_id": _parse_landing_yandex_id(body.yandex_id),
         "site_url": site_url,
         "client_ip": _client_ip(request),
         "internal_id": None,
@@ -784,6 +806,7 @@ async def landing_phone_webhook(request: Request):
                 site_url=session.get("site_url"),
                 partner=session.get("partner") or "",
                 stamp=session.get("stamp") or "",
+                yandex_id=session.get("yandex_id"),
             )
             session["internal_id"] = int(user.id)
         except Exception as e:
@@ -812,6 +835,7 @@ async def landing_phone_status(request_id: str, request: Request):
                 site_url=session.get("site_url"),
                 partner=session.get("partner") or "",
                 stamp=session.get("stamp") or "",
+                yandex_id=session.get("yandex_id"),
             )
             internal_id = int(user.id)
             session["internal_id"] = internal_id
@@ -882,6 +906,7 @@ async def landing_whatsapp_verify_code(body: WhatsAppVerifyIn, request: Request)
         site_url=site_url,
         partner=str(partner),
         landing_stamp=stamp,
+        yandex_id=_parse_landing_yandex_id(body.yandex_id or session.get("yandex_id")),
     )
     _whatsapp_auth_codes.pop(body.code, None)
     _whatsapp_wa_id_active_code.pop(wa_id, None)

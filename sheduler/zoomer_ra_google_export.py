@@ -6,7 +6,7 @@ import os
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy import func, select
 
@@ -55,23 +55,20 @@ class _StampAgg:
     all_trials_connect: int = 0
 
 
-async def _collect_stamp_rows() -> List[List]:
-    async with AsyncSessionLocal() as session:
-        stmt = select(
-            Users.user_id,
-            Users.stamp,
-            Users.reserve_field,
-            Users.in_panel,
-            Users.is_connect,
-            Users.subscription_end_date,
-        ).where(
-            Users.is_delete == False,
-            # В ILIKE «_» — один любой символ; нужна подстрока «ra_», не «ra» + символ.
-            func.strpos(func.lower(Users.stamp), "ra_") > 0,
-        )
-        rows = (await session.execute(stmt)).all()
+RA_EXPORT_XLSX_HEADERS: Tuple[str, ...] = (
+    "ключ",
+    "пользователи",
+    "оплатившие",
+    "действующие триалы",
+    "действующие триалы, которые подключили впн",
+)
 
-    export_moment = datetime.now(timezone.utc)
+
+def _aggregate_ra_stamps(
+    rows,
+    *,
+    export_moment: datetime,
+) -> Dict[str, _StampAgg]:
     by_stamp: Dict[str, _StampAgg] = defaultdict(_StampAgg)
     for _user_id, stamp, reserve_field, in_panel, is_connect, sub_end in rows:
         key = (stamp or "").strip()
@@ -96,21 +93,126 @@ async def _collect_stamp_rows() -> List[List]:
             if is_connect:
                 agg.active_trials_connect += 1
 
-    out: List[List] = [_SHEET_HEADERS]
+    return by_stamp
+
+
+async def _fetch_ra_stamp_user_rows(
+    *,
+    period_start: Optional[datetime] = None,
+    period_end: Optional[datetime] = None,
+):
+    async with AsyncSessionLocal() as session:
+        stmt = select(
+            Users.user_id,
+            Users.stamp,
+            Users.reserve_field,
+            Users.in_panel,
+            Users.is_connect,
+            Users.subscription_end_date,
+        ).where(
+            # В ILIKE «_» — один любой символ; нужна подстрока «ra_», не «ra» + символ.
+            func.strpos(func.lower(Users.stamp), "ra_") > 0,
+        )
+        if period_start is not None:
+            stmt = stmt.where(Users.create_user >= period_start)
+        if period_end is not None:
+            stmt = stmt.where(Users.create_user < period_end)
+        return (await session.execute(stmt)).all()
+
+
+def _rows_from_by_stamp(
+    by_stamp: Dict[str, _StampAgg],
+    *,
+    headers: List[str],
+    include_totals: bool,
+) -> List[List]:
+    out: List[List] = [headers]
+    totals = _StampAgg()
     for stamp in sorted(by_stamp.keys(), key=str.casefold):
         a = by_stamp[stamp]
-        out.append(
-            [
-                stamp,
-                a.users,
-                a.paid_users,
-                a.active_trials,
-                a.active_trials_connect,
-                a.all_trials,
-                a.all_trials_connect,
-            ]
-        )
+        if len(headers) == len(_SHEET_HEADERS):
+            out.append(
+                [
+                    stamp,
+                    a.users,
+                    a.paid_users,
+                    a.active_trials,
+                    a.active_trials_connect,
+                    a.all_trials,
+                    a.all_trials_connect,
+                ]
+            )
+        else:
+            out.append(
+                [
+                    stamp,
+                    a.users,
+                    a.paid_users,
+                    a.active_trials,
+                    a.active_trials_connect,
+                ]
+            )
+        totals.users += a.users
+        totals.paid_users += a.paid_users
+        totals.active_trials += a.active_trials
+        totals.active_trials_connect += a.active_trials_connect
+        totals.all_trials += a.all_trials
+        totals.all_trials_connect += a.all_trials_connect
+
+    if include_totals and by_stamp:
+        if len(headers) == len(_SHEET_HEADERS):
+            out.append(
+                [
+                    "ИТОГО",
+                    totals.users,
+                    totals.paid_users,
+                    totals.active_trials,
+                    totals.active_trials_connect,
+                    totals.all_trials,
+                    totals.all_trials_connect,
+                ]
+            )
+        else:
+            out.append(
+                [
+                    "ИТОГО",
+                    totals.users,
+                    totals.paid_users,
+                    totals.active_trials,
+                    totals.active_trials_connect,
+                ]
+            )
     return out
+
+
+async def collect_ra_export_xlsx_rows(
+    *,
+    period_start: datetime,
+    period_end: datetime,
+) -> List[List]:
+    """Строки для /export_ra: фильтр create_user в [period_start, period_end)."""
+    rows = await _fetch_ra_stamp_user_rows(
+        period_start=period_start,
+        period_end=period_end,
+    )
+    export_moment = datetime.now(timezone.utc)
+    by_stamp = _aggregate_ra_stamps(rows, export_moment=export_moment)
+    return _rows_from_by_stamp(
+        by_stamp,
+        headers=list(RA_EXPORT_XLSX_HEADERS),
+        include_totals=True,
+    )
+
+
+async def _collect_stamp_rows() -> List[List]:
+    rows = await _fetch_ra_stamp_user_rows()
+    export_moment = datetime.now(timezone.utc)
+    by_stamp = _aggregate_ra_stamps(rows, export_moment=export_moment)
+    return _rows_from_by_stamp(
+        by_stamp,
+        headers=list(_SHEET_HEADERS),
+        include_totals=False,
+    )
 
 
 def _write_google_sheet(rows: List[List]) -> None:

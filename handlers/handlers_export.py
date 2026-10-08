@@ -11,7 +11,7 @@ from aiogram import F, Router
 from openpyxl.styles import Alignment, Border, Side, PatternFill
 
 from bot import bot, sql, x3
-from config import ADMIN_IDS
+from config import ADMIN_IDS, ADMINS_RA
 from config_bd.models import (
     Users,
     FirstSite,
@@ -37,6 +37,9 @@ from aiogram.types import (
     Message,
 )
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from sheduler.zoomer_ra_google_export import collect_ra_export_xlsx_rows
 from telegram_ids import is_telegram_chat_id
 from wl_traffic.service import (
     fetch_panel_user,
@@ -1618,3 +1621,168 @@ async def export_panel(message: Message):
     )
 
     logger.info(f"Администратор {message.from_user.id} выгрузил список пользователей панели")
+
+
+def _parse_export_ra_date(raw: str) -> Optional[date]:
+    text = (raw or "").strip()
+    for fmt in ("%d.%m.%y", "%d.%m.%Y"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+class ExportRaFSM(StatesGroup):
+    waiting_start = State()
+    waiting_end = State()
+
+
+def _sync_build_ra_xlsx(rows: List[List]) -> str:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "ra_export"
+    header_alignment = Alignment(horizontal="center", vertical="center")
+    thin_border = Border(
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side(style="thin"),
+    )
+    for row_num, row in enumerate(rows, 1):
+        for col_num, value in enumerate(row, 1):
+            cell = ws.cell(row=row_num, column=col_num, value=value)
+            cell.border = thin_border
+            if row_num == 1:
+                cell.alignment = header_alignment
+    for col in ws.columns:
+        max_len = 0
+        col_letter = col[0].column_letter
+        for cell in col:
+            if cell.value is not None:
+                max_len = max(max_len, len(str(cell.value)))
+        ws.column_dimensions[col_letter].width = min(max_len + 2, _EXCEL_COL_WIDTH_MAX)
+    ws.freeze_panes = "A2"
+    export_path = tempfile.mktemp(suffix=".xlsx")
+    wb.save(export_path)
+    return export_path
+
+
+@router.message(Command("export_ra"))
+async def export_ra_start(message: Message, state: FSMContext) -> None:
+    if not message.from_user or message.from_user.id not in ADMINS_RA:
+        if message.from_user and message.from_user.id in ADMIN_IDS:
+            await message.answer("❌ Команда доступна только ADMINS_RA.")
+        return
+    await state.clear()
+    await state.set_state(ExportRaFSM.waiting_start)
+    await message.answer(
+        "📅 Укажите <b>начало</b> периода (дата регистрации пользователей), "
+        "формат <code>01.10.26</code>\n\n"
+        "Отмена: <code>/export_ra_cancel</code>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(Command("export_ra_cancel"))
+async def export_ra_cancel(message: Message, state: FSMContext) -> None:
+    if not message.from_user or message.from_user.id not in ADMINS_RA:
+        return
+    await state.clear()
+    await message.answer("Выгрузка RA отменена.")
+
+
+@router.message(ExportRaFSM.waiting_start)
+async def export_ra_waiting_start(message: Message, state: FSMContext) -> None:
+    if not message.from_user or message.from_user.id not in ADMINS_RA:
+        await state.clear()
+        return
+    if message.text and message.text.startswith("/"):
+        if message.text.split()[0] != "/export_ra_cancel":
+            await message.answer(
+                "Сначала введите дату начала (DD.MM.YY) или отмените: /export_ra_cancel"
+            )
+        return
+    start_day = _parse_export_ra_date(message.text or "")
+    if start_day is None:
+        await message.answer(
+            "❌ Неверный формат. Пример: <code>01.10.26</code>",
+            parse_mode="HTML",
+        )
+        return
+    await state.update_data(period_start=datetime.combine(start_day, datetime.min.time()))
+    await state.set_state(ExportRaFSM.waiting_end)
+    await message.answer(
+        "📅 Укажите <b>конец</b> периода (не включая эту дату, с 00:00), "
+        "формат <code>08.10.26</code>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(ExportRaFSM.waiting_end)
+async def export_ra_waiting_end(message: Message, state: FSMContext) -> None:
+    if not message.from_user or message.from_user.id not in ADMINS_RA:
+        await state.clear()
+        return
+    if message.text and message.text.startswith("/"):
+        if message.text.split()[0] != "/export_ra_cancel":
+            await message.answer(
+                "Введите дату конца (DD.MM.YY) или отмените: /export_ra_cancel"
+            )
+        return
+    end_day = _parse_export_ra_date(message.text or "")
+    if end_day is None:
+        await message.answer(
+            "❌ Неверный формат. Пример: <code>08.10.26</code>",
+            parse_mode="HTML",
+        )
+        return
+    data = await state.get_data()
+    period_start: datetime = data["period_start"]
+    period_end = datetime.combine(end_day, datetime.min.time())
+    if period_end <= period_start:
+        await message.answer(
+            "❌ Конец периода должен быть позже начала (граница конца — 00:00, день не входит)."
+        )
+        return
+
+    await state.clear()
+    await message.answer("🔄 Формирую выгрузку RA…")
+
+    export_path = None
+    try:
+        rows = await collect_ra_export_xlsx_rows(
+            period_start=period_start,
+            period_end=period_end,
+        )
+        export_path = await asyncio.to_thread(_sync_build_ra_xlsx, rows)
+        start_s = period_start.strftime("%d.%m.%y")
+        end_s = end_day.strftime("%d.%m.%y")
+        stamp_count = max(0, len(rows) - 1 - (1 if len(rows) > 1 and rows[-1][0] == "ИТОГО" else 0))
+        await message.answer_document(
+            document=FSInputFile(
+                export_path,
+                filename=f"export_ra_{start_s}_{end_s}.xlsx",
+            ),
+            caption=(
+                f"📊 Выгрузка RA\n"
+                f"Период: {start_s} 00:00 — {end_s} 00:00 (конец не включён)\n"
+                f"Меток: {stamp_count}"
+            ),
+        )
+        logger.info(
+            "ADMINS_RA %s /export_ra %s — %s: %s меток",
+            message.from_user.id,
+            start_s,
+            end_s,
+            stamp_count,
+        )
+    except Exception:
+        logger.exception("Ошибка /export_ra")
+        await message.answer("❌ Не удалось сформировать выгрузку. Попробуйте позже.")
+    finally:
+        if export_path:
+            try:
+                os.remove(export_path)
+            except OSError:
+                pass

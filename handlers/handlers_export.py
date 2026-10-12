@@ -11,7 +11,7 @@ from aiogram import F, Router
 from openpyxl.styles import Alignment, Border, Side, PatternFill
 
 from bot import bot, sql, x3
-from config import ADMIN_IDS, ADMINS_RA
+from config import ADMIN_IDS, ADMINS_RA, ADMINS_YD
 from config_bd.models import (
     Users,
     FirstSite,
@@ -40,6 +40,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from sheduler.zoomer_ra_google_export import collect_ra_export_xlsx_rows
+from sheduler.zoomer_yd_export import collect_yd_export_workbook_rows
 from telegram_ids import is_telegram_chat_id
 from wl_traffic.service import (
     fetch_panel_user,
@@ -1779,6 +1780,90 @@ async def export_ra_waiting_end(message: Message, state: FSMContext) -> None:
         )
     except Exception:
         logger.exception("Ошибка /export_ra")
+        await message.answer("❌ Не удалось сформировать выгрузку. Попробуйте позже.")
+    finally:
+        if export_path:
+            try:
+                os.remove(export_path)
+            except OSError:
+                pass
+
+
+def _write_yd_sheet(ws, rows: List[List]) -> None:
+    header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    thin_border = Border(
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side(style="thin"),
+    )
+    for row_num, row in enumerate(rows, 1):
+        for col_num, value in enumerate(row, 1):
+            cell = ws.cell(row=row_num, column=col_num, value=value)
+            cell.border = thin_border
+            if row_num == 1:
+                cell.alignment = header_alignment
+    for col in ws.columns:
+        max_len = 0
+        col_letter = col[0].column_letter
+        for cell in col:
+            if cell.value is not None:
+                max_len = max(max_len, len(str(cell.value)))
+        ws.column_dimensions[col_letter].width = min(max_len + 2, _EXCEL_COL_WIDTH_MAX)
+    ws.freeze_panes = "A2"
+
+
+def _sync_build_yd_xlsx(general_rows: List[List], yesterday_rows: List[List]) -> str:
+    wb = openpyxl.Workbook()
+    ws_general = wb.active
+    ws_general.title = "ОБЩИЙ"
+    _write_yd_sheet(ws_general, general_rows)
+    ws_yesterday = wb.create_sheet("ВЧЕРА")
+    _write_yd_sheet(ws_yesterday, yesterday_rows)
+    export_path = tempfile.mktemp(suffix=".xlsx")
+    wb.save(export_path)
+    return export_path
+
+
+@router.message(Command("export_yd"))
+async def export_yd_command(message: Message) -> None:
+    if not message.from_user or message.from_user.id not in ADMINS_YD:
+        if message.from_user and message.from_user.id in ADMIN_IDS:
+            await message.answer("❌ Команда доступна только ADMINS_YD.")
+        return
+
+    await message.answer("🔄 Формирую выгрузку YD…")
+    export_path = None
+    try:
+        general_rows, yesterday_rows = await collect_yd_export_workbook_rows()
+        export_path = await asyncio.to_thread(
+            _sync_build_yd_xlsx,
+            general_rows,
+            yesterday_rows,
+        )
+        yesterday_msk = (datetime.now(MSK).date() - timedelta(days=1)).strftime("%d.%m.%Y")
+        stamp_count = max(
+            0,
+            len(general_rows) - 1 - (1 if len(general_rows) > 1 and general_rows[-1][0] == "ИТОГО" else 0),
+        )
+        await message.answer_document(
+            document=FSInputFile(
+                export_path,
+                filename=f"export_yd_{datetime.now(MSK).strftime('%d.%m.%y')}.xlsx",
+            ),
+            caption=(
+                "📊 Выгрузка YD\n"
+                f"Лист «ОБЩИЙ»: меток {stamp_count}\n"
+                f"Лист «ВЧЕРА»: регистрации за {yesterday_msk} (МСК)"
+            ),
+        )
+        logger.info(
+            "ADMINS_YD %s /export_yd: keys=%s",
+            message.from_user.id,
+            stamp_count,
+        )
+    except Exception:
+        logger.exception("Ошибка /export_yd")
         await message.answer("❌ Не удалось сформировать выгрузку. Попробуйте позже.")
     finally:
         if export_path:

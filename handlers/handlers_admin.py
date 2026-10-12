@@ -2217,6 +2217,27 @@ async def check_site_command(message: Message):
 
 
 _HAPP_LAB_STAMP = "happ_lab"
+_INCY_LAB_STAMP = "incy_lab"
+
+
+async def _reply_lab_stamp_stats(message: Message, stamp: str, command_name: str) -> None:
+    total, in_second_site = await asyncio.gather(
+        sql.count_users_by_stamp(stamp),
+        sql.count_users_by_stamp_in_second_site(stamp),
+    )
+    await message.answer(
+        f"🏷 Метка <code>{stamp}</code>\n\n"
+        f"Всего пользователей: <b>{total}</b>\n"
+        f"В таблице second_site: <b>{in_second_site}</b>",
+        parse_mode="HTML",
+    )
+    logger.info(
+        "Админ %s выполнил /%s: total=%s second_site=%s",
+        message.from_user.id,
+        command_name,
+        total,
+        in_second_site,
+    )
 
 
 @router.message(Command(commands=["check_happ"]))
@@ -2226,24 +2247,22 @@ async def check_happ_command(message: Message):
         return
 
     try:
-        total, in_second_site = await asyncio.gather(
-            sql.count_users_by_stamp(_HAPP_LAB_STAMP),
-            sql.count_users_by_stamp_in_second_site(_HAPP_LAB_STAMP),
-        )
-        await message.answer(
-            f"🏷 Метка <code>{_HAPP_LAB_STAMP}</code>\n\n"
-            f"Всего пользователей: <b>{total}</b>\n"
-            f"В таблице second_site: <b>{in_second_site}</b>",
-            parse_mode="HTML",
-        )
-        logger.info(
-            "Админ %s выполнил /check_happ: total=%s second_site=%s",
-            message.from_user.id,
-            total,
-            in_second_site,
-        )
+        await _reply_lab_stamp_stats(message, _HAPP_LAB_STAMP, "check_happ")
     except Exception as e:
         logger.exception("Ошибка в /check_happ")
+        await message.answer(f"❌ Ошибка: {str(e)}")
+
+
+@router.message(Command(commands=["check_incy"]))
+async def check_incy_command(message: Message):
+    """Сколько пользователей с меткой incy_lab и сколько из них в second_site."""
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    try:
+        await _reply_lab_stamp_stats(message, _INCY_LAB_STAMP, "check_incy")
+    except Exception as e:
+        logger.exception("Ошибка в /check_incy")
         await message.answer(f"❌ Ошибка: {str(e)}")
 
 

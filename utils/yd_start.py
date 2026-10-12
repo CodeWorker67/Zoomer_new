@@ -8,6 +8,7 @@ from typing import Optional, Tuple
 def parse_yd_start_arg(start_arg: str) -> Optional[Tuple[str, str]]:
     """
     YDhapp_lab_1791285975313217366 → stamp=happ_lab, yandex_id=1791285975313217366
+    YDincy_lab_1791285975313217366 → stamp=incy_lab, yandex_id=1791285975313217366
     stamp — между YD и последним «_», yandex_id — после последнего «_».
     """
     if not start_arg or not start_arg.startswith("YD"):

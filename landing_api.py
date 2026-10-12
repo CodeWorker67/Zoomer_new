@@ -528,7 +528,10 @@ def _parse_landing_stamp(raw: Optional[str]) -> str:
     if not value or value.startswith("partner_"):
         return ""
     if value.startswith("YD"):
-        return ""
+        from utils.yd_start import parse_yd_start_arg
+
+        parsed = parse_yd_start_arg(value)
+        return parsed[0] if parsed else ""
     if _parse_partner_ref(value):
         return ""
     return value[:100]
@@ -541,6 +544,30 @@ def _parse_landing_yandex_id(raw: Optional[str]) -> Optional[str]:
     if not value:
         return None
     return value[:100]
+
+
+def _landing_yandex_id(
+    explicit: Optional[str],
+    *,
+    stamp_raw: Optional[str] = None,
+    start_query: Optional[str] = None,
+) -> Optional[str]:
+    """ClientID Метрики из поля yandex_id или из YD{stamp}_{yandex_id} в start/stamp."""
+    yd = _parse_landing_yandex_id(explicit)
+    if yd:
+        return yd
+    from utils.yd_start import parse_yd_start_arg
+
+    for raw in (stamp_raw, start_query):
+        if not raw:
+            continue
+        value = str(raw).strip()
+        if not value.startswith("YD"):
+            continue
+        parsed = parse_yd_start_arg(value)
+        if parsed:
+            return parsed[1]
+    return None
 
 
 def _landing_attribution(
@@ -652,12 +679,17 @@ async def landing_send_code(body: EmailIn, request: Request):
             stamp_raw=body.stamp,
             start_query=request.query_params.get("start"),
         )
+        start_q = request.query_params.get("start")
         await sql.register_landing_email_user(
             em,
             site_url=_site_url_from_request(request),
             partner=partner,
             stamp=stamp,
-            yandex_id=_parse_landing_yandex_id(body.yandex_id),
+            yandex_id=_landing_yandex_id(
+                body.yandex_id,
+                stamp_raw=body.stamp,
+                start_query=start_q,
+            ),
         )
     await _send_landing_otp(em)
     return {"success": True, "email": em}
@@ -732,13 +764,18 @@ async def landing_google(body: GoogleAuthIn, request: Request):
                 stamp_raw=body.stamp,
                 start_query=request.query_params.get("start"),
             )
+            start_q = request.query_params.get("start")
             internal_id = await sql.register_landing_google_user(
                 em,
                 google_sub,
                 site_url=_site_url_from_request(request),
                 partner=partner,
                 stamp=stamp,
-                yandex_id=_parse_landing_yandex_id(body.yandex_id),
+                yandex_id=_landing_yandex_id(
+                    body.yandex_id,
+                    stamp_raw=body.stamp,
+                    start_query=start_q,
+                ),
             )
             pair = await sql.get_landing_user_by_internal_id(internal_id)
             if pair is None:
@@ -782,6 +819,7 @@ async def landing_phone_start(body: PhoneStartIn, request: Request):
     call_to_phone = str(auth_data.get("callToPhone") or "")
     if not request_id or not call_to_phone:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Некорректный ответ LoginBot")
+    start_q = request.query_params.get("start")
     _phone_auth_sessions[request_id] = {
         "request_id": request_id,
         "phone": phone,
@@ -789,7 +827,11 @@ async def landing_phone_start(body: PhoneStartIn, request: Request):
         "created_at": time.time(),
         "partner": partner,
         "stamp": stamp,
-        "yandex_id": _parse_landing_yandex_id(body.yandex_id),
+        "yandex_id": _landing_yandex_id(
+            body.yandex_id,
+            stamp_raw=body.stamp,
+            start_query=start_q,
+        ),
         "site_url": site_url,
         "client_ip": _client_ip(request),
         "internal_id": None,
@@ -928,7 +970,11 @@ async def landing_whatsapp_verify_code(body: WhatsAppVerifyIn, request: Request)
         site_url=site_url,
         partner=str(partner),
         landing_stamp=stamp,
-        yandex_id=_parse_landing_yandex_id(body.yandex_id or session.get("yandex_id")),
+        yandex_id=_landing_yandex_id(
+            body.yandex_id or session.get("yandex_id"),
+            stamp_raw=body.stamp or session.get("stamp"),
+            start_query=request.query_params.get("start"),
+        ),
     )
     _whatsapp_auth_codes.pop(body.code, None)
     _whatsapp_wa_id_active_code.pop(wa_id, None)

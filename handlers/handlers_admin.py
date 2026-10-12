@@ -2216,6 +2216,37 @@ async def check_site_command(message: Message):
                 pass
 
 
+_HAPP_LAB_STAMP = "happ_lab"
+
+
+@router.message(Command(commands=["check_happ"]))
+async def check_happ_command(message: Message):
+    """Сколько пользователей с меткой happ_lab и сколько из них в second_site."""
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    try:
+        total, in_second_site = await asyncio.gather(
+            sql.count_users_by_stamp(_HAPP_LAB_STAMP),
+            sql.count_users_by_stamp_in_second_site(_HAPP_LAB_STAMP),
+        )
+        await message.answer(
+            f"🏷 Метка <code>{_HAPP_LAB_STAMP}</code>\n\n"
+            f"Всего пользователей: <b>{total}</b>\n"
+            f"В таблице second_site: <b>{in_second_site}</b>",
+            parse_mode="HTML",
+        )
+        logger.info(
+            "Админ %s выполнил /check_happ: total=%s second_site=%s",
+            message.from_user.id,
+            total,
+            in_second_site,
+        )
+    except Exception as e:
+        logger.exception("Ошибка в /check_happ")
+        await message.answer(f"❌ Ошибка: {str(e)}")
+
+
 @router.message(Command(commands=['new']))
 async def new_panel_users_command(message: Message):
     """2 сквада обычной подписки → 3 чанка → POST bulk/update-squads по порядку; сквад на каждый HTTP — random из двух."""

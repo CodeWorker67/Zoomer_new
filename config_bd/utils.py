@@ -3297,6 +3297,17 @@ class AsyncSQL:
             result = await session.execute(stmt)
             return [int(row[0]) for row in result.all()]
 
+    async def count_users_by_stamp_in_second_site(self, stamp: str) -> int:
+        async with self.session_factory() as session:
+            stmt = (
+                select(func.count())
+                .select_from(Users)
+                .join(SecondSite, SecondSite.tg_id == Users.user_id)
+                .where(Users.stamp == stamp)
+            )
+            result = await session.execute(stmt)
+            return int(result.scalar_one() or 0)
+
     async def count_old_inactive_users(self, cutoff: datetime) -> int:
         async with self.session_factory() as session:
             stmt = (

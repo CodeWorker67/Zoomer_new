@@ -20,7 +20,11 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.exc import IntegrityError
 
 from bot import bot, sql, x3
-from lead_tracker import post_user_trial
+from lead_tracker import (
+    post_user_registered_from_billing_id,
+    post_user_registered_from_internal_id,
+    post_user_trial,
+)
 from config_bd.utils import _norm_email, user_row_to_api_dict
 from X3 import panel_username_for_site_user
 from config import (
@@ -705,7 +709,13 @@ async def auth_check_status(token: str, request: Request):
     tg_user = entry["telegram_user"]
     uid = int(tg_user["id"])
     partner_raw = request.query_params.get("partner")
-    await sql.ensure_telegram_user_with_partner(uid, partner_raw)
+    inserted = await sql.ensure_telegram_user_with_partner(uid, partner_raw)
+    if inserted:
+        await post_user_registered_from_billing_id(
+            uid,
+            username=tg_user.get("username"),
+            full_name=tg_user.get("first_name"),
+        )
 
     jwt_token = _issue_jwt(user_id=uid, auth="telegram", username=tg_user.get("username"))
 
@@ -746,7 +756,13 @@ async def auth_bot_login(body: BotLoginIn, request: Request):
 
     tg_user = entry["telegram_user"]
     uid = int(tg_user["id"])
-    await sql.ensure_telegram_user_with_partner(uid, body.partner)
+    inserted = await sql.ensure_telegram_user_with_partner(uid, body.partner)
+    if inserted:
+        await post_user_registered_from_billing_id(
+            uid,
+            username=tg_user.get("username"),
+            full_name=tg_user.get("first_name"),
+        )
 
     del _bot_site_login_tokens[raw]
     jwt_token = _issue_jwt(user_id=uid, auth="telegram", username=tg_user.get("username"))
@@ -767,8 +783,17 @@ async def auth_telegram(body: TelegramAuthIn, request: Request):
     data = body.model_dump(exclude_none=True, exclude={"partner", "stamp"})
     _verify_telegram_login(data)
     uid = int(body.id)
-    await sql.ensure_telegram_user_with_partner(uid, partner_raw)
+    inserted = await sql.ensure_telegram_user_with_partner(uid, partner_raw)
     await _apply_site_stamp_to_tg_user(uid, body.stamp)
+    if inserted:
+        full_name = " ".join(
+            p for p in (body.first_name or "", body.last_name or "") if p
+        ).strip() or None
+        await post_user_registered_from_billing_id(
+            uid,
+            username=body.username,
+            full_name=full_name,
+        )
 
     secret = _require_jwt_secret()
     exp = datetime.now(timezone.utc) + timedelta(hours=24)
@@ -1528,6 +1553,7 @@ async def auth_register(body: RegisterIn, request: Request):
         str(body.email), h, stamp=stamp, partner=body.partner or ""
     )
     em = str(body.email).strip().lower()
+    await post_user_registered_from_internal_id(internal_id, username=em)
     await _send_verification_code(em)
     return {"success": True, "requires_verification": True, "email": em}
 
@@ -1606,6 +1632,11 @@ async def auth_google(body: GoogleAuthIn, request: Request):
             em, h, stamp=stamp, partner=body.partner or ""
         )
         await sql.set_email_verified(internal_id, True)
+        await post_user_registered_from_internal_id(
+            internal_id,
+            username=em,
+            full_name=payload.get("name") or payload.get("given_name"),
+        )
     else:
         internal_id = int(row[0])
         await sql.attach_partner_if_empty(body.partner, internal_id=internal_id)

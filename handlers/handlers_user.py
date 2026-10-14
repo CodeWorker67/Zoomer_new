@@ -4,7 +4,12 @@ from datetime import datetime, timezone
 from bot import sql, x3, bot
 from config import ADMIN_IDS, CHANEL_ID, CHECKER_ID, PUBLIC_SITE_URL, PARTNER_PROCENT, PARTNER_MIN, SUPPORT_URL, BOT_URL
 from handlers.handlers_start_prize import schedule_start_prize
-from lead_tracker import post_user_registered, post_user_trial, tracker_source_from_ref_and_stamp
+from lead_tracker import (
+    post_user_registered,
+    post_user_registered_from_billing_id,
+    post_user_trial,
+    tracker_source_from_ref_and_stamp,
+)
 from keyboard import (keyboard_start, keyboard_tariff_bonus, keyboard_tariff,
                       keyboard_sub_after_free, ref_keyboard, keyboard_gift_tariff,
                       keyboard_gift_tariff_repeat,
@@ -495,7 +500,13 @@ async def free_vpn_cb(callback: CallbackQuery):
         return
 
     if user_data is None:
-        await sql.add_user(uid, False)
+        inserted = await sql.add_user(uid, False)
+        if inserted:
+            await post_user_registered_from_billing_id(
+                uid,
+                username=callback.from_user.username,
+                full_name=callback.from_user.full_name,
+            )
     await sql.update_field_bool_3(uid, True)
 
     ok = await x3.addClient(day, str(uid), uid)
@@ -522,12 +533,19 @@ async def free_vpn_cb(callback: CallbackQuery):
             kb = keyboard_trial_existing_expired()
         await callback.answer()
         await edit_or_send_photo(callback, "subscription_manage", caption, kb)
+        await post_user_trial(uid)
         return
 
     if await sql.get_user(uid) is not None:
         await sql.update_in_panel(uid)
     else:
-        await sql.add_user(uid, True)
+        inserted = await sql.add_user(uid, True)
+        if inserted:
+            await post_user_registered_from_billing_id(
+                uid,
+                username=callback.from_user.username,
+                full_name=callback.from_user.full_name,
+            )
     await sql.init_wl_trial_limits(uid)
 
     sub_url = await x3.sublink(str(uid))
@@ -882,7 +900,13 @@ async def activate_gift(message: Message, gift_id: str):
         await message.answer(lexicon['gift_no'])
         logger.warning(f'Ссылка на подарок протухла')
         if await sql.get_user(message.from_user.id) is None:
-            await sql.add_user(message.from_user.id, False)
+            inserted = await sql.add_user(message.from_user.id, False)
+            if inserted:
+                await post_user_registered_from_billing_id(
+                    message.from_user.id,
+                    username=message.from_user.username,
+                    full_name=message.from_user.full_name,
+                )
             logger.success(
                 f'Юзер {message.from_user.id} - {message.from_user.username} зашел в бота в первый раз по подарочной ссылке')
         return False
@@ -897,8 +921,13 @@ async def activate_gift(message: Message, gift_id: str):
     # Сначала гарантируем наличие пользователя в БД.
     was_in_db = await sql.get_user(message.from_user.id) is not None
     if not was_in_db:
-        await sql.add_user(message.from_user.id, False)
-
+        inserted = await sql.add_user(message.from_user.id, False)
+        if inserted:
+            await post_user_registered_from_billing_id(
+                message.from_user.id,
+                username=message.from_user.username,
+                full_name=message.from_user.full_name,
+            )
 
     # Проверяем существует ли пользователь
     existing_user = await x3.get_user_by_username(user_id_str)

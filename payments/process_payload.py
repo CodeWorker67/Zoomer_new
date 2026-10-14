@@ -355,18 +355,7 @@ async def process_confirmed_payment(
                 giver_billing_id = int(raw_uid)
 
             gift_id = await sql.create_gift(giver_billing_id, duration, white_flag)
-            pay_tracker_uid: Optional[int] = None
-            if giver_billing_id > 0:
-                pay_tracker_uid = giver_billing_id
-            elif row_g is not None and len(row_g) > 27 and row_g[27] is not None:
-                try:
-                    lt = int(row_g[27])
-                    if lt > 0:
-                        pay_tracker_uid = lt
-                except (TypeError, ValueError):
-                    pass
-            if pay_tracker_uid is not None:
-                await post_payment_success(pay_tracker_uid, method, amount)
+            await post_payment_success(giver_billing_id, method, amount)
 
             await _credit_partner_commission(giver_billing_id, method, amount)
             await report_landing_payment_to_metrica(giver_billing_id, method, amount)
@@ -551,10 +540,9 @@ async def process_confirmed_payment(
                     await reassign_to_active_squad(x3, panel_user)
 
             tracker_pay_uid = (
-                notify_tg if notify_tg is not None and notify_tg > 0 else (db_uid if db_uid > 0 else None)
+                notify_tg if notify_tg is not None and notify_tg > 0 else db_uid
             )
-            if tracker_pay_uid is not None:
-                await post_payment_success(tracker_pay_uid, method, amount)
+            await post_payment_success(tracker_pay_uid, method, amount)
 
             await _credit_partner_commission(db_uid, method, amount)
             await report_landing_payment_to_metrica(db_uid, method, amount)

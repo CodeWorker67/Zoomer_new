@@ -18,7 +18,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, EmailStr, Field
 
 from bot import sql, x3
-from lead_tracker import post_user_trial
+from lead_tracker import post_user_registered_from_internal_id, post_user_trial
 from X3 import panel_username_for_site_user
 from config import (
     ADMIN_IDS,
@@ -402,6 +402,10 @@ async def _ensure_landing_whatsapp_user(
         phone=phone,
         yandex_id=yandex_id,
     )
+    await post_user_registered_from_internal_id(
+        internal_id,
+        username=profile_name or wa_id,
+    )
     pair = await sql.get_landing_user_by_internal_id(internal_id)
     if pair is None:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "User creation failed")
@@ -448,6 +452,7 @@ async def _ensure_landing_phone_user(
         stamp=stamp,
         yandex_id=yandex_id,
     )
+    await post_user_registered_from_internal_id(internal_id, username=phone)
     pair = await sql.get_landing_user_by_internal_id(internal_id)
     if pair is None:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "User creation failed")
@@ -680,7 +685,7 @@ async def landing_send_code(body: EmailIn, request: Request):
             start_query=request.query_params.get("start"),
         )
         start_q = request.query_params.get("start")
-        await sql.register_landing_email_user(
+        internal_id = await sql.register_landing_email_user(
             em,
             site_url=_site_url_from_request(request),
             partner=partner,
@@ -691,6 +696,7 @@ async def landing_send_code(body: EmailIn, request: Request):
                 start_query=start_q,
             ),
         )
+        await post_user_registered_from_internal_id(internal_id, username=em)
     await _send_landing_otp(em)
     return {"success": True, "email": em}
 
@@ -776,6 +782,11 @@ async def landing_google(body: GoogleAuthIn, request: Request):
                     stamp_raw=body.stamp,
                     start_query=start_q,
                 ),
+            )
+            await post_user_registered_from_internal_id(
+                internal_id,
+                username=em,
+                full_name=payload.get("name") or payload.get("given_name"),
             )
             pair = await sql.get_landing_user_by_internal_id(internal_id)
             if pair is None:

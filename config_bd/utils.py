@@ -2230,7 +2230,8 @@ class AsyncSQL:
         self,
         telegram_user_id: int,
         partner_raw: Any,
-    ) -> None:
+    ) -> bool:
+        """True, если пользователь только что создан в БД."""
         partner = normalize_partner_id(partner_raw)
         if partner and int(partner) == int(telegram_user_id):
             partner = None
@@ -2242,9 +2243,10 @@ class AsyncSQL:
                 False,
                 partner=partner or "",
             )
-            return
+            return True
         if partner:
             await self.attach_partner_if_empty(partner, telegram_user_id=telegram_user_id)
+        return False
 
     async def add_partner_balance(self, partner_user_id: int, amount: int) -> bool:
         if amount <= 0:

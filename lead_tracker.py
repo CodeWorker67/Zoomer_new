@@ -170,6 +170,41 @@ async def sync_user_from_db(telegram_user_id: int) -> bool:
     return await _post_json("/users/", body, kind="sync")
 
 
+async def post_user_registered_from_internal_id(
+    internal_id: int,
+    *,
+    username: Optional[str] = None,
+    full_name: Optional[str] = None,
+) -> None:
+    row = await sql.get_user_by_internal_id(internal_id)
+    if row is None:
+        return
+    billing_user_id = int(row[1])
+    await post_user_registered(
+        billing_user_id,
+        username,
+        full_name,
+        _source_from_row(row),
+    )
+
+
+async def post_user_registered_from_billing_id(
+    billing_user_id: int,
+    *,
+    username: Optional[str] = None,
+    full_name: Optional[str] = None,
+) -> None:
+    row = await sql.get_user(billing_user_id)
+    if row is None:
+        return
+    await post_user_registered(
+        billing_user_id,
+        username,
+        full_name,
+        _source_from_row(row),
+    )
+
+
 async def post_user_registered(
     telegram_user_id: int,
     username: Optional[str],

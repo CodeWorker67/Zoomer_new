@@ -5,8 +5,8 @@ from zoneinfo import ZoneInfo
 
 # Белые ноды Антиглушилка: расход суммируется по всем.
 WL_NODE_NAMES = (
+    "YANDEX-RU-001",
     "YANDEX-RU-002",
-    "Yandex-RU-003",
 )
 WL_TIMEZONE = ZoneInfo("Europe/Moscow")
 # Сутки WL-трафика: с 03:00 до 02:59 МСК (накопление в 02:57, проверка после 03:05).

@@ -51,7 +51,7 @@ def _aggregate_yd_stamps(
     export_moment: datetime,
 ) -> Dict[str, _YdStampAgg]:
     by_stamp: Dict[str, _YdStampAgg] = defaultdict(_YdStampAgg)
-    for _user_id, stamp, reserve_field, in_panel, sub_end in rows:
+    for _user_id, stamp, reserve_field, in_panel, sub_end, *_rest in rows:
         key = (stamp or "").strip()
         if not key:
             continue

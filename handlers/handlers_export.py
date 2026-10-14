@@ -1813,13 +1813,17 @@ def _write_yd_sheet(ws, rows: List[List]) -> None:
     ws.freeze_panes = "A2"
 
 
-def _sync_build_yd_xlsx(general_rows: List[List], yesterday_rows: List[List]) -> str:
+def _sync_build_yd_xlsx(
+    general_rows: List[List],
+    daily_sheets: List[Tuple[str, List[List]]],
+) -> str:
     wb = openpyxl.Workbook()
     ws_general = wb.active
     ws_general.title = "ОБЩИЙ"
     _write_yd_sheet(ws_general, general_rows)
-    ws_yesterday = wb.create_sheet("ВЧЕРА")
-    _write_yd_sheet(ws_yesterday, yesterday_rows)
+    for sheet_title, sheet_rows in daily_sheets:
+        ws = wb.create_sheet(sheet_title)
+        _write_yd_sheet(ws, sheet_rows)
     export_path = tempfile.mktemp(suffix=".xlsx")
     wb.save(export_path)
     return export_path
@@ -1835,17 +1839,25 @@ async def export_yd_command(message: Message) -> None:
     await message.answer("🔄 Формирую выгрузку YD…")
     export_path = None
     try:
-        general_rows, yesterday_rows = await collect_yd_export_workbook_rows()
+        general_rows, daily_sheets = await collect_yd_export_workbook_rows()
         export_path = await asyncio.to_thread(
             _sync_build_yd_xlsx,
             general_rows,
-            yesterday_rows,
+            daily_sheets,
         )
-        yesterday_msk = (datetime.now(MSK).date() - timedelta(days=1)).strftime("%d.%m.%Y")
         stamp_count = max(
             0,
             len(general_rows) - 1 - (1 if len(general_rows) > 1 and general_rows[-1][0] == "ИТОГО" else 0),
         )
+        if daily_sheets:
+            newest_day, oldest_day = daily_sheets[0][0], daily_sheets[-1][0]
+            days_caption = (
+                f"Листы по дням (МСК): {len(daily_sheets)} шт., {newest_day}"
+                if len(daily_sheets) == 1
+                else f"Листы по дням (МСК): {len(daily_sheets)} шт., {newest_day} → {oldest_day}"
+            )
+        else:
+            days_caption = "Листы по дням (МСК): нет регистраций с датой"
         await message.answer_document(
             document=FSInputFile(
                 export_path,
@@ -1854,13 +1866,14 @@ async def export_yd_command(message: Message) -> None:
             caption=(
                 "📊 Выгрузка YD\n"
                 f"Лист «ОБЩИЙ»: меток {stamp_count}\n"
-                f"Лист «ВЧЕРА»: регистрации за {yesterday_msk} (МСК)"
+                f"{days_caption}"
             ),
         )
         logger.info(
-            "ADMINS_YD %s /export_yd: keys=%s",
+            "ADMINS_YD %s /export_yd: keys=%s days=%s",
             message.from_user.id,
             stamp_count,
+            len(daily_sheets),
         )
     except Exception:
         logger.exception("Ошибка /export_yd")

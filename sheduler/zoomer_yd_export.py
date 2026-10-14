@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from typing import Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
@@ -33,18 +33,16 @@ class _YdStampAgg:
     no_subscription: int = 0
 
 
-def _msk_day_bounds_as_utc_naive(day: date) -> Tuple[datetime, datetime]:
-    start = datetime(day.year, day.month, day.day, tzinfo=MSK)
-    end = start + timedelta(days=1)
-    return (
-        start.astimezone(timezone.utc).replace(tzinfo=None),
-        end.astimezone(timezone.utc).replace(tzinfo=None),
-    )
+def _msk_date_from_create_user(create_user: datetime) -> date:
+    if create_user.tzinfo is None:
+        aware = create_user.replace(tzinfo=timezone.utc)
+    else:
+        aware = create_user.astimezone(timezone.utc)
+    return aware.astimezone(MSK).date()
 
 
-def yesterday_msk_bounds_utc_naive() -> Tuple[datetime, datetime]:
-    today_msk = datetime.now(MSK).date()
-    return _msk_day_bounds_as_utc_naive(today_msk - timedelta(days=1))
+def _yd_sheet_title_for_day(day: date) -> str:
+    return day.strftime("%d.%m.%y")
 
 
 def _aggregate_yd_stamps(
@@ -121,6 +119,7 @@ async def _fetch_yd_stamp_user_rows(
             Users.reserve_field,
             Users.in_panel,
             Users.subscription_end_date,
+            Users.create_user,
         ).where(
             Users.yandex_id.isnot(None),
             Users.yandex_id != "",
@@ -130,6 +129,15 @@ async def _fetch_yd_stamp_user_rows(
         if period_end is not None:
             stmt = stmt.where(Users.create_user < period_end)
         return (await session.execute(stmt)).all()
+
+
+def _yd_stamp_rows_from_fetched(
+    rows,
+    *,
+    export_moment: datetime,
+) -> List[List]:
+    by_stamp = _aggregate_yd_stamps(rows, export_moment=export_moment)
+    return _rows_from_by_stamp(by_stamp, include_totals=True)
 
 
 async def collect_yd_export_sheet_rows(
@@ -142,16 +150,25 @@ async def collect_yd_export_sheet_rows(
         period_end=period_end,
     )
     export_moment = datetime.now(timezone.utc)
-    by_stamp = _aggregate_yd_stamps(rows, export_moment=export_moment)
-    return _rows_from_by_stamp(by_stamp, include_totals=True)
+    return _yd_stamp_rows_from_fetched(rows, export_moment=export_moment)
 
 
-async def collect_yd_export_workbook_rows() -> Tuple[List[List], List[List]]:
-    """Листы ОБЩИЙ и ВЧЕРА (регистрация вчера по календарю МСК)."""
-    general = await collect_yd_export_sheet_rows()
-    y_start, y_end = yesterday_msk_bounds_utc_naive()
-    yesterday = await collect_yd_export_sheet_rows(
-        period_start=y_start,
-        period_end=y_end,
-    )
-    return general, yesterday
+async def collect_yd_export_workbook_rows() -> Tuple[List[List], List[Tuple[str, List[List]]]]:
+    """Лист ОБЩИЙ и листы по дням регистрации (МСК), от новых дат к старым."""
+    rows = await _fetch_yd_stamp_user_rows()
+    export_moment = datetime.now(timezone.utc)
+    general = _yd_stamp_rows_from_fetched(rows, export_moment=export_moment)
+
+    by_day: Dict[date, list] = defaultdict(list)
+    for row in rows:
+        create_user = row[5]
+        if create_user is None:
+            continue
+        by_day[_msk_date_from_create_user(create_user)].append(row)
+
+    daily_sheets: List[Tuple[str, List[List]]] = []
+    for day in sorted(by_day.keys(), reverse=True):
+        sheet_rows = _yd_stamp_rows_from_fetched(by_day[day], export_moment=export_moment)
+        daily_sheets.append((_yd_sheet_title_for_day(day), sheet_rows))
+
+    return general, daily_sheets
